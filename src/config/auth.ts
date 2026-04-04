@@ -23,7 +23,10 @@ function isAgencyCallbackUrl(url: unknown) {
 
   try {
     const parsedUrl = new URL(url, clientUrl);
-    return parsedUrl.pathname === "/agency" || parsedUrl.pathname.startsWith("/agency/");
+    return (
+      parsedUrl.pathname === "/agency" ||
+      parsedUrl.pathname.startsWith("/agency/")
+    );
   } catch {
     return false;
   }
@@ -59,7 +62,9 @@ function getPortalFromUrl(url: unknown) {
   return null;
 }
 
-function isPortal(value: unknown): value is typeof AGENCY_PORTAL | typeof CITIZEN_PORTAL {
+function isPortal(
+  value: unknown,
+): value is typeof AGENCY_PORTAL | typeof CITIZEN_PORTAL {
   return value === AGENCY_PORTAL || value === CITIZEN_PORTAL;
 }
 
@@ -119,11 +124,13 @@ function logPortalDecision(details: Record<string, unknown>) {
   console.log("[AUTH PORTAL]", JSON.stringify(details));
 }
 
-async function revokeNewSession(ctx: Parameters<typeof createAuthMiddleware>[0] extends (
-  ...args: infer A
-) => unknown
-  ? A[0]
-  : never) {
+async function revokeNewSession(
+  ctx: Parameters<typeof createAuthMiddleware>[0] extends (
+    ...args: infer A
+  ) => unknown
+    ? A[0]
+    : never,
+) {
   const newSession = ctx.context.newSession;
 
   if (!newSession) {
@@ -142,6 +149,10 @@ export const auth = betterAuth({
   baseURL: betterAuthUrl,
   basePath: "/api/auth",
   trustedOrigins: [clientUrl, betterAuthUrl],
+  account: {
+    storeStateStrategy: "database",
+    skipStateCookieCheck: true,
+  },
   emailAndPassword: {
     enabled: true,
   },
@@ -169,7 +180,8 @@ export const auth = betterAuth({
       const isWarga = newSession.user.role === "warga";
       const requestPortal = getRequestPortal(ctx);
 
-      let targetPortal: typeof AGENCY_PORTAL | typeof CITIZEN_PORTAL | null = requestPortal;
+      let targetPortal: typeof AGENCY_PORTAL | typeof CITIZEN_PORTAL | null =
+        requestPortal;
       let redirectTarget: string | null = null;
       let callbackUrl: string | null = null;
       let parsedStatePortal: string | null = null;
@@ -177,12 +189,16 @@ export const auth = betterAuth({
       if (ctx.path === "/sign-in/email") {
         callbackUrl = String(ctx.body?.callbackURL || "");
         if (!targetPortal) {
-          targetPortal = isAgencyCallbackUrl(callbackUrl) ? AGENCY_PORTAL : CITIZEN_PORTAL;
+          targetPortal = isAgencyCallbackUrl(callbackUrl)
+            ? AGENCY_PORTAL
+            : CITIZEN_PORTAL;
         }
       } else if (ctx.path?.startsWith("/callback/")) {
         const oauthState = await getOAuthState();
         if (oauthState) {
-          parsedStatePortal = isPortal(oauthState.portal) ? oauthState.portal : null;
+          parsedStatePortal = isPortal(oauthState.portal)
+            ? oauthState.portal
+            : null;
           targetPortal = isPortal(oauthState.portal)
             ? oauthState.portal
             : isAgencyCallbackUrl(oauthState.callbackURL)
@@ -227,7 +243,9 @@ export const auth = betterAuth({
           });
           await revokeNewSession(ctx);
           if (ctx.path === "/sign-in/email") {
-            throw new APIError("FORBIDDEN", { message: citizenRoleErrorMessage });
+            throw new APIError("FORBIDDEN", {
+              message: citizenRoleErrorMessage,
+            });
           } else if (redirectTarget) {
             return {
               headers: new Headers({
@@ -263,7 +281,9 @@ export const auth = betterAuth({
           });
           await revokeNewSession(ctx);
           if (ctx.path === "/sign-in/email") {
-            throw new APIError("FORBIDDEN", { message: agencyRoleErrorMessage });
+            throw new APIError("FORBIDDEN", {
+              message: agencyRoleErrorMessage,
+            });
           } else if (redirectTarget) {
             return {
               headers: new Headers({
