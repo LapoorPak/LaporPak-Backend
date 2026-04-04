@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "dev": "nodemon --watch src --ext ts --exec \"tsx src/index.ts\"",
-    "build": "tsc",
+    "build": "prisma generate && tsc",
     "start": "node dist/index.js",
     "db:migrate": "npx prisma migrate dev",
     "db:studio": "npx prisma studio",
