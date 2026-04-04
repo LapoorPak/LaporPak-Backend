@@ -1,8 +1,10 @@
 import cors from "cors";
 
-const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
+const allowedOrigins = (process.env.CORS_ORIGINS || "http://localhost:5173")
+  .split(",")
+  .map((o) => o.trim());
 
 export const corsMiddleware = cors({
-  origin: clientUrl,
+  origin: allowedOrigins,
   credentials: true,
 });
