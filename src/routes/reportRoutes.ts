@@ -177,8 +177,9 @@ router.post("/", requireAuth, requireCitizenRole, async (req, res, next) => {
 // GET /api/reports/:id
 router.get("/:id", async (req, res, next) => {
   try {
+    const id = req.params.id as string;
     const laporan = await prisma.laporan.findUnique({
-      where: { id: req.params.id },
+      where: { id },
       include: {
         kategori: { include: { dinas: true } },
         createdBy: { select: { id: true, name: true, image: true } },
@@ -199,6 +200,7 @@ router.get("/:id", async (req, res, next) => {
 // POST /api/reports/:id/status
 router.post("/:id/status", requireAuth, requireAgencyRole, async (req, res, next) => {
   try {
+    const id = req.params.id as string;
     const { status } = req.body;
 
     if (!status || !VALID_STATUSES.includes(status)) {
@@ -206,7 +208,7 @@ router.post("/:id/status", requireAuth, requireAgencyRole, async (req, res, next
     }
 
     const existing = await prisma.laporan.findUnique({
-      where: { id: req.params.id },
+      where: { id },
     });
 
     if (!existing) {
@@ -214,7 +216,7 @@ router.post("/:id/status", requireAuth, requireAgencyRole, async (req, res, next
     }
 
     const laporan = await prisma.laporan.update({
-      where: { id: req.params.id },
+      where: { id },
       data: { status },
       include: {
         kategori: { include: { dinas: true } },
@@ -232,6 +234,7 @@ router.post("/:id/status", requireAuth, requireAgencyRole, async (req, res, next
 // POST /api/reports/:id/assign
 router.post("/:id/assign", requireAuth, requireAgencyRole, async (req, res, next) => {
   try {
+    const id = req.params.id as string;
     const { assignedToId } = req.body;
 
     if (!assignedToId) {
@@ -239,7 +242,7 @@ router.post("/:id/assign", requireAuth, requireAgencyRole, async (req, res, next
     }
 
     const existing = await prisma.laporan.findUnique({
-      where: { id: req.params.id },
+      where: { id },
     });
 
     if (!existing) {
@@ -247,7 +250,7 @@ router.post("/:id/assign", requireAuth, requireAgencyRole, async (req, res, next
     }
 
     const laporan = await prisma.laporan.update({
-      where: { id: req.params.id },
+      where: { id },
       data: { assignedToId },
       include: {
         kategori: { include: { dinas: true } },
