@@ -20,9 +20,11 @@ model User {
   banReason     String?
   banExpires    DateTime?
   phone         String?
-
-  sessions Session[]
-  accounts Account[]
+  accounts        Account[]
+  sessions        Session[]
+  createdReports  Laporan[]      @relation("ReportCreator")
+  assignedReports Laporan[]      @relation("ReportAssignee")
+  petugas         PetugasDinas?
 
   @@map("user")
 }
@@ -46,7 +48,6 @@ model Account {
   accountId             String
   providerId            String
   userId                String
-  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   accessToken           String?
   refreshToken          String?
   idToken               String?
@@ -56,17 +57,91 @@ model Account {
   password              String?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("account")
 }
 
 model Verification {
-  id         String    @id
+  id         String   @id
   identifier String
   value      String
   expiresAt  DateTime
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   @@map("verification")
+}
+
+// ── Business Models ──────────────────────────────────────
+
+enum LaporanStatus {
+  pending
+  verified
+  in_progress
+  resolved
+  rejected
+}
+
+model Dinas {
+  id    String @id @default(cuid())
+  code  String @unique
+  name  String
+  short String
+
+  kategori   KategoriLaporan[]
+  petugas    PetugasDinas[]
+
+  @@map("dinas")
+}
+
+model KategoriLaporan {
+  id      String @id @default(cuid())
+  code    String @unique
+  name    String
+  dinasId String
+  dinas   Dinas  @relation(fields: [dinasId], references: [id])
+
+  laporan Laporan[]
+
+  @@map("kategori_laporan")
+}
+
+model Laporan {
+  id          String        @id @default(cuid())
+  title       String
+  description String
+  status      LaporanStatus @default(pending)
+  images      String[]
+  latitude    Float
+  longitude   Float
+  address     String?
+
+  kategoriId  String
+  kategori    KategoriLaporan @relation(fields: [kategoriId], references: [id])
+
+  createdById String
+  createdBy   User @relation("ReportCreator", fields: [createdById], references: [id])
+
+  assignedToId String?
+  assignedTo   User? @relation("ReportAssignee", fields: [assignedToId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([createdById])
+  @@index([kategoriId, status])
+  @@index([latitude, longitude])
+  @@map("laporan")
+}
+
+model PetugasDinas {
+  id      String @id @default(cuid())
+  nip     String @unique
+  userId  String @unique
+  user    User   @relation(fields: [userId], references: [id])
+  dinasId String
+  dinas   Dinas  @relation(fields: [dinasId], references: [id])
+
+  @@map("petugas_dinas")
 }
