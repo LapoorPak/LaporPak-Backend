@@ -3,6 +3,8 @@ import { Router } from "express";
 import { prisma } from "../config/db.js";
 import { AppError, requireAuth, requireAgencyRole, requireCitizenRole } from "../middleware/authMiddleware.js";
 import { LaporanStatus } from "../generated/prisma/client.js";
+import { classifyReport, getDinasTypeForCategory } from "../services/geminiService.js";
+import { getWilayah } from "../services/geoService.js";
 
 const router = Router();
 const VALID_STATUSES = Object.values(LaporanStatus);
@@ -41,6 +43,7 @@ router.get("/", async (req, res, next) => {
         where,
         include: {
           kategori: { include: { dinas: true } },
+          cabangDinas: { include: { dinas: true } },
           createdBy: { select: { id: true, name: true, image: true } },
         },
         orderBy: { createdAt: "desc" },
@@ -76,6 +79,7 @@ router.get("/me", requireAuth, async (req, res, next) => {
         where,
         include: {
           kategori: { include: { dinas: true } },
+          cabangDinas: { include: { dinas: true } },
         },
         orderBy: { createdAt: "desc" },
         skip,
@@ -118,6 +122,7 @@ router.get("/nearby", async (req, res, next) => {
       },
       include: {
         kategori: { include: { dinas: true } },
+        cabangDinas: { include: { dinas: true } },
         createdBy: { select: { id: true, name: true, image: true } },
       },
       orderBy: { createdAt: "desc" },
@@ -134,36 +139,132 @@ router.get("/nearby", async (req, res, next) => {
   }
 });
 
+// POST /api/reports/classify-preview
+router.post("/classify-preview", requireAuth, async (req, res, next) => {
+  try {
+    const { title, description, images, latitude, longitude } = req.body;
+
+    if (!title || !description) {
+      throw new AppError("title and description are required", 400);
+    }
+
+    const result = await classifyReport({ title, description, imagePaths: images });
+
+    const kategori = await prisma.kategoriLaporan.findUnique({
+      where: { code: result.categoryCode },
+      include: { dinas: true },
+    });
+
+    // If coordinates provided, resolve the specific branch office by wilayah
+    let assignedCabang = null;
+    if (latitude != null && longitude != null) {
+      const dinasType = getDinasTypeForCategory(result.categoryCode);
+      const wilayah = getWilayah(Number(latitude), Number(longitude));
+      if (dinasType && wilayah) {
+        assignedCabang = await prisma.cabangDinas.findFirst({
+          where: { dinas: { type: dinasType }, wilayah },
+          include: { dinas: true },
+        });
+      }
+    }
+
+    res.json({ ...result, kategori, assignedCabang, wilayah: latitude != null && longitude != null ? getWilayah(Number(latitude), Number(longitude)) : null });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // POST /api/reports
 router.post("/", requireAuth, requireCitizenRole, async (req, res, next) => {
   try {
     const { title, description, kategoriId, latitude, longitude, address, images } = req.body;
 
-    if (!title || !description || !kategoriId || latitude == null || longitude == null) {
-      throw new AppError("title, description, kategoriId, latitude, and longitude are required", 400);
+    if (!title || !description || latitude == null || longitude == null) {
+      throw new AppError("title, description, latitude, and longitude are required", 400);
     }
 
-    const kategori = await prisma.kategoriLaporan.findUnique({
-      where: { id: kategoriId },
-    });
+    let resolvedKategoriId: string;
+    let dinasType: string | undefined;
+    let aiConfidence: number | null = null;
+    let aiReasoning: string | null = null;
+    let aiClassified = false;
 
-    if (!kategori) {
-      throw new AppError("Invalid kategoriId", 400);
+    if (kategoriId) {
+      const kategori = await prisma.kategoriLaporan.findUnique({
+        where: { id: kategoriId },
+        include: { dinas: true },
+      });
+
+      if (!kategori) {
+        throw new AppError("Invalid kategoriId", 400);
+      }
+
+      resolvedKategoriId = kategoriId;
+      dinasType = kategori.dinas.type || kategori.dinas.code;
+    } else {
+      try {
+        const result = await classifyReport({ title, description, imagePaths: images });
+
+        const kategori = await prisma.kategoriLaporan.findUnique({
+          where: { code: result.categoryCode },
+        });
+
+        if (!kategori) {
+          throw new Error("AI returned unknown category code");
+        }
+
+        resolvedKategoriId = kategori.id;
+        dinasType = getDinasTypeForCategory(result.categoryCode);
+        aiConfidence = result.confidence;
+        aiReasoning = result.reasoning;
+        aiClassified = true;
+      } catch (e) {
+        console.error("[classify] error:", e);
+        throw new AppError(
+          "Unable to classify report automatically. Please provide kategoriId manually.",
+          422,
+        );
+      }
+    }
+
+    // Resolve the specific branch office by dinas type + wilayah (geographic lookup)
+    let cabangDinasId: string | null = null;
+    if (dinasType) {
+      const wilayah = getWilayah(Number(latitude), Number(longitude));
+      if (wilayah) {
+        const cabang = await prisma.cabangDinas.findFirst({
+          where: { dinas: { type: dinasType }, wilayah },
+        });
+        if (cabang) cabangDinasId = cabang.id;
+      }
+
+      // Fallback: if no wilayah match, pick any branch of this dinas type
+      if (!cabangDinasId) {
+        const cabang = await prisma.cabangDinas.findFirst({
+          where: { dinas: { type: dinasType } },
+        });
+        if (cabang) cabangDinasId = cabang.id;
+      }
     }
 
     const laporan = await prisma.laporan.create({
       data: {
         title,
         description,
-        kategoriId,
+        kategoriId: resolvedKategoriId,
+        cabangDinasId,
         latitude: Number(latitude),
         longitude: Number(longitude),
         address: address || null,
         images: images || [],
         createdById: req.user.id,
+        aiConfidence,
+        aiReasoning,
+        aiClassified,
       },
       include: {
         kategori: { include: { dinas: true } },
+        cabangDinas: { include: { dinas: true } },
         createdBy: { select: { id: true, name: true, image: true } },
       },
     });
@@ -182,6 +283,7 @@ router.get("/:id", async (req, res, next) => {
       where: { id },
       include: {
         kategori: { include: { dinas: true } },
+        cabangDinas: { include: { dinas: true } },
         createdBy: { select: { id: true, name: true, image: true } },
         assignedTo: { select: { id: true, name: true, image: true } },
       },
@@ -220,6 +322,7 @@ router.post("/:id/status", requireAuth, requireAgencyRole, async (req, res, next
       data: { status },
       include: {
         kategori: { include: { dinas: true } },
+        cabangDinas: { include: { dinas: true } },
         createdBy: { select: { id: true, name: true, image: true } },
         assignedTo: { select: { id: true, name: true, image: true } },
       },
@@ -254,6 +357,7 @@ router.post("/:id/assign", requireAuth, requireAgencyRole, async (req, res, next
       data: { assignedToId },
       include: {
         kategori: { include: { dinas: true } },
+        cabangDinas: { include: { dinas: true } },
         createdBy: { select: { id: true, name: true, image: true } },
         assignedTo: { select: { id: true, name: true, image: true } },
       },

@@ -26,9 +26,13 @@ router.get("/:id", async (req, res, next) => {
       where: { id: req.params.id },
       include: {
         kategori: true,
-        petugas: {
+        cabang: {
           include: {
-            user: { select: { id: true, name: true, image: true } },
+            petugas: {
+              include: {
+                user: { select: { id: true, name: true, image: true } },
+              },
+            },
           },
         },
       },
