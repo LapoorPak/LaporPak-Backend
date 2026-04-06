@@ -20,8 +20,10 @@ model User {
   banReason     String?
   banExpires    DateTime?
   phone         String?
-  accounts        Account[]
+
   sessions        Session[]
+  accounts        Account[]
+  
   createdReports  Laporan[]      @relation("ReportCreator")
   assignedReports Laporan[]      @relation("ReportAssignee")
   petugas         PetugasDinas?
@@ -73,8 +75,6 @@ model Verification {
   @@map("verification")
 }
 
-// ── Business Models ──────────────────────────────────────
-
 enum LaporanStatus {
   pending
   verified
@@ -84,15 +84,37 @@ enum LaporanStatus {
 }
 
 model Dinas {
-  id    String @id @default(cuid())
-  code  String @unique
-  name  String
-  short String
+  id      String  @id @default(cuid())
+  code    String  @unique
+  type    String    @default("")
+  name    String
+  short   String
+  wilayah String?
 
   kategori   KategoriLaporan[]
-  petugas    PetugasDinas[]
+  cabang     CabangDinas[]
 
+  @@index([type, wilayah])
   @@map("dinas")
+}
+
+model CabangDinas {
+  id        String  @id @default(cuid())
+  name      String
+  wilayah   String
+  address   String?
+  latitude  Float?
+  longitude Float?
+  phone     String?
+
+  dinasId   String
+  dinas     Dinas   @relation(fields: [dinasId], references: [id])
+
+  petugas   PetugasDinas[]
+  laporan   Laporan[]
+
+  @@index([dinasId, wilayah])
+  @@map("cabang_dinas")
 }
 
 model KategoriLaporan {
@@ -120,28 +142,36 @@ model Laporan {
   kategoriId  String
   kategori    KategoriLaporan @relation(fields: [kategoriId], references: [id])
 
+  cabangDinasId String?
+  cabangDinas   CabangDinas? @relation(fields: [cabangDinasId], references: [id])
+
   createdById String
   createdBy   User @relation("ReportCreator", fields: [createdById], references: [id])
 
   assignedToId String?
   assignedTo   User? @relation("ReportAssignee", fields: [assignedToId], references: [id])
 
+  aiConfidence Float?
+  aiReasoning  String?
+  aiClassified Boolean @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([createdById])
   @@index([kategoriId, status])
+  @@index([cabangDinasId, status])
   @@index([latitude, longitude])
   @@map("laporan")
 }
 
 model PetugasDinas {
-  id      String @id @default(cuid())
-  nip     String @unique
-  userId  String @unique
-  user    User   @relation(fields: [userId], references: [id])
-  dinasId String
-  dinas   Dinas  @relation(fields: [dinasId], references: [id])
+  id            String      @id @default(cuid())
+  nip           String      @unique
+  userId        String      @unique
+  user          User        @relation(fields: [userId], references: [id])
+  cabangDinasId String
+  cabangDinas   CabangDinas @relation(fields: [cabangDinasId], references: [id])
 
   @@map("petugas_dinas")
 }
