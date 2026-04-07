@@ -7,6 +7,29 @@ datasource db {
   provider = "postgresql"
 }
 
+enum LaporanStatus {
+  pending
+  verified
+  in_progress
+  resolved
+  rejected
+}
+
+enum LaporanRoutingStatus {
+  pending
+  auto_assigned
+  manual_review
+  manually_assigned
+  failed
+}
+
+enum NotificationType {
+  success
+  warning
+  danger
+  info
+}
+
 model User {
   id            String    @id
   name          String
@@ -23,9 +46,9 @@ model User {
 
   sessions        Session[]
   accounts        Account[]
-  
   createdReports  Laporan[]      @relation("ReportCreator")
   assignedReports Laporan[]      @relation("ReportAssignee")
+  resolvedReports Laporan[]      @relation("ReportResolver")
   petugas         PetugasDinas?
   notifications   Notification[]
 
@@ -76,120 +99,161 @@ model Verification {
   @@map("verification")
 }
 
-enum LaporanStatus {
-  pending
-  verified
-  in_progress
-  resolved
-  rejected
-}
-
 model Dinas {
-  id      String  @id @default(cuid())
-  code    String  @unique
-  type    String    @default("")
-  name    String
-  short   String
-  wilayah String?
+  id              String                   @id @default(cuid())
+  code            String                   @unique
+  type            String                   @default("")
+  name            String
+  short           String
+  wilayah         String?
+  description     String?
+  isActive        Boolean                  @default(true)
+  routingPriority Int                      @default(100)
 
-  kategori   KategoriLaporan[]
-  cabang     CabangDinas[]
+  kategori         KategoriLaporan[]
+  cabang           CabangDinas[]
+  routingDecisions LaporanRoutingDecision[]
 
   @@index([type, wilayah])
+  @@index([isActive, routingPriority])
   @@map("dinas")
 }
 
 model CabangDinas {
-  id        String  @id @default(cuid())
-  name      String
-  wilayah   String
-  address   String?
-  latitude  Float?
-  longitude Float?
-  phone     String?
+  id               String                   @id @default(cuid())
+  name             String
+  wilayah          String
+  address          String?
+  latitude         Float?
+  longitude        Float?
+  phone            String?
+  province         String?
+  cityRegency      String?
+  coverageRadiusKm Int?
+  isRoutingEnabled Boolean                  @default(true)
+  serviceTags      String[]                 @default([])
+  metadata         Json?
 
-  dinasId   String
-  dinas     Dinas   @relation(fields: [dinasId], references: [id])
+  dinasId String
+  dinas   Dinas @relation(fields: [dinasId], references: [id])
 
-  petugas   PetugasDinas[]
-  laporan   Laporan[]
+  petugas          PetugasDinas[]
+  laporan          Laporan[]
+  routingDecisions LaporanRoutingDecision[]
 
   @@index([dinasId, wilayah])
+  @@index([cityRegency, isRoutingEnabled])
+  @@index([latitude, longitude])
   @@map("cabang_dinas")
 }
 
 model KategoriLaporan {
-  id      String @id @default(cuid())
-  code    String @unique
-  name    String
-  dinasId String
-  dinas   Dinas  @relation(fields: [dinasId], references: [id])
+  id            String   @id @default(cuid())
+  code          String   @unique
+  name          String
+  description   String?
+  slaHours      Int?
+  urgencyWeight Int      @default(50)
+  keywords      String[] @default([])
+  isActive      Boolean  @default(true)
+  dinasId       String
+  dinas         Dinas    @relation(fields: [dinasId], references: [id])
 
-  laporan Laporan[]
+  laporan          Laporan[]
+  routingDecisions LaporanRoutingDecision[]
 
+  @@index([dinasId, isActive])
   @@map("kategori_laporan")
 }
 
 model Laporan {
-  id          String        @id @default(cuid())
-  title       String
-  description String
-  status      LaporanStatus @default(pending)
-  images      String[]
-  latitude    Float
-  longitude   Float
-  address     String?
+  id                    String               @id @default(cuid())
+  title                 String
+  description           String
+  status                LaporanStatus        @default(pending)
+  routingStatus         LaporanRoutingStatus @default(pending)
+  images                String[]
+  latitude              Float
+  longitude             Float
+  address               String?
+  kategoriId            String
+  cabangDinasId         String?
+  createdById           String
+  assignedToId          String?
+  resolvedById          String?
+  aiConfidence          Float?
+  aiReasoning           String?
+  aiClassified          Boolean              @default(false)
+  aiUrgencyScore        Int?
+  aiSuggestedSlaHours   Int?
+  aiAssignedBranchReason String?
+  aiRouteMeta           Json?
+  resolutionNote        String?
+  resolvedAt            DateTime?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
 
-  kategoriId  String
   kategori    KategoriLaporan @relation(fields: [kategoriId], references: [id])
+  cabangDinas CabangDinas?    @relation(fields: [cabangDinasId], references: [id])
+  createdBy   User            @relation("ReportCreator", fields: [createdById], references: [id])
+  assignedTo  User?           @relation("ReportAssignee", fields: [assignedToId], references: [id])
+  resolvedBy  User?           @relation("ReportResolver", fields: [resolvedById], references: [id])
 
-  cabangDinasId String?
-  cabangDinas   CabangDinas? @relation(fields: [cabangDinasId], references: [id])
-
-  createdById String
-  createdBy   User @relation("ReportCreator", fields: [createdById], references: [id])
-
-  assignedToId String?
-  assignedTo   User? @relation("ReportAssignee", fields: [assignedToId], references: [id])
-
-  aiConfidence Float?
-  aiReasoning  String?
-  aiClassified Boolean @default(false)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  notifications   Notification[]
+  routingDecisions LaporanRoutingDecision[]
 
   @@index([createdById])
   @@index([kategoriId, status])
   @@index([cabangDinasId, status])
-  notifications Notification[]
-
+  @@index([routingStatus, createdAt])
   @@index([latitude, longitude])
   @@map("laporan")
 }
 
-enum NotificationType {
-  success
-  warning
-  danger
-  info
+model LaporanRoutingDecision {
+  id               String           @id @default(cuid())
+  laporanId        String
+  kategoriId       String?
+  dinasId          String?
+  cabangDinasId    String?
+  source           String           @default("ai")
+  confidence       Float?
+  urgencyScore     Int?
+  suggestedSlaHours Int?
+  distanceKm       Float?
+  wilayahMatched   String?
+  reasoning        String?
+  candidateCabang  Json?
+  createdAt        DateTime         @default(now())
+
+  laporan     Laporan          @relation(fields: [laporanId], references: [id], onDelete: Cascade)
+  kategori    KategoriLaporan? @relation(fields: [kategoriId], references: [id], onDelete: SetNull)
+  dinas       Dinas?           @relation(fields: [dinasId], references: [id], onDelete: SetNull)
+  cabangDinas CabangDinas?     @relation(fields: [cabangDinasId], references: [id], onDelete: SetNull)
+
+  @@index([laporanId, createdAt])
+  @@index([dinasId, createdAt])
+  @@index([cabangDinasId, createdAt])
+  @@map("laporan_routing_decision")
 }
 
 model Notification {
-  id        String           @id @default(cuid())
-  type      NotificationType
-  title     String
-  message   String
-  tag       String
-  isRead    Boolean          @default(false)
+  id          String           @id @default(cuid())
+  type        NotificationType
+  title       String
+  message     String
+  tag         String
+  isRead      Boolean          @default(false)
+  readAt      DateTime?
+  deliveredAt DateTime?
+  metadata    Json?
+  userId      String
+  laporanId   String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @default(now()) @updatedAt
 
-  userId    String
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  laporanId String?
-  laporan   Laporan?         @relation(fields: [laporanId], references: [id], onDelete: SetNull)
-
-  createdAt DateTime         @default(now())
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  laporan Laporan? @relation(fields: [laporanId], references: [id], onDelete: SetNull)
 
   @@index([userId, isRead])
   @@index([userId, createdAt])
