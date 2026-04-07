@@ -1,15 +1,11 @@
-import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 import multer from "multer";
 
 import { AppError } from "../middleware/authMiddleware.js";
-
-const UPLOAD_DIR = path.resolve("uploads");
+import { UPLOAD_DIR } from "./storage.js";
 const MAX_SIZE = 5 * 1024 * 1024; // 5MB
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
-
-fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => {

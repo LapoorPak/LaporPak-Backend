@@ -1,5 +1,6 @@
 import { Router } from "express";
 
+import { UPLOAD_PUBLIC_PATH } from "../config/storage.js";
 import { upload } from "../config/upload.js";
 import { requireAuth } from "../middleware/authMiddleware.js";
 
@@ -12,7 +13,7 @@ router.post("/image", requireAuth, upload.single("image"), (req, res) => {
     return;
   }
 
-  res.status(201).json({ url: `/uploads/${req.file.filename}` });
+  res.status(201).json({ url: `${UPLOAD_PUBLIC_PATH}/${req.file.filename}` });
 });
 
 export default router;

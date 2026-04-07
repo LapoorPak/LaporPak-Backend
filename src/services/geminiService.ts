@@ -1,6 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import fs from "fs";
 import path from "path";
+import { UPLOAD_DIR } from "../config/storage.js";
 import { REPORT_CATEGORIES } from "../data/reportCategories.js";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
@@ -16,15 +17,18 @@ const CATEGORY_DINAS_MAP = new Map(
   REPORT_CATEGORIES.map((category) => [category.code, category.dinasCode]),
 );
 
-export function getDinasTypeForCategory(categoryCode: string): string | undefined {
+export function getDinasTypeForCategory(
+  categoryCode: string,
+): string | undefined {
   return CATEGORY_DINAS_MAP.get(categoryCode);
 }
 
-const UPLOAD_DIR = path.resolve("uploads");
-const MAX_IMAGES = 3;
+const MAX_IMAGES = 5;
 
 function buildPrompt(title: string, description: string): string {
-  const categoryList = CATEGORIES.map((c) => `- ${c.code}: ${c.name} — ${c.desc}`).join("\n");
+  const categoryList = CATEGORIES.map(
+    (c) => `- ${c.code}: ${c.name} — ${c.desc}`,
+  ).join("\n");
 
   return `You are a civic infrastructure report classifier for an Indonesian city government platform called LaporPak. Classify the following citizen report into exactly ONE of these categories:
 
@@ -80,12 +84,13 @@ export async function classifyReport(input: {
   imagePaths?: string[];
 }): Promise<ClassificationResult> {
   const prompt = buildPrompt(input.title, input.description);
-  const imageParts = input.imagePaths?.length ? loadImageParts(input.imagePaths) : [];
+  const imageParts = input.imagePaths?.length
+    ? loadImageParts(input.imagePaths)
+    : [];
 
-  const contents: Array<{ text: string } | { inlineData: { data: string; mimeType: string } }> = [
-    { text: prompt },
-    ...imageParts,
-  ];
+  const contents: Array<
+    { text: string } | { inlineData: { data: string; mimeType: string } }
+  > = [{ text: prompt }, ...imageParts];
 
   const response = await ai.models.generateContent({
     model: "gemini-3.1-flash-lite-preview",
@@ -93,13 +98,18 @@ export async function classifyReport(input: {
   });
 
   const text = response.text ?? "";
-  const cleaned = text.replace(/```json?\n?/g, "").replace(/```/g, "").trim();
+  const cleaned = text
+    .replace(/```json?\n?/g, "")
+    .replace(/```/g, "")
+    .trim();
 
   let parsed: any;
   try {
     parsed = JSON.parse(cleaned);
   } catch {
-    throw new Error(`Failed to parse Gemini response as JSON: ${cleaned.slice(0, 200)}`);
+    throw new Error(
+      `Failed to parse Gemini response as JSON: ${cleaned.slice(0, 200)}`,
+    );
   }
 
   if (!parsed.categoryCode || !VALID_CODES.has(parsed.categoryCode)) {
