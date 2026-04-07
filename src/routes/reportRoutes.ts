@@ -5,6 +5,7 @@ import { AppError, requireAuth, requireAgencyRole, requireCitizenRole } from "..
 import { LaporanStatus } from "../generated/prisma/client.js";
 import { classifyReport, getDinasTypeForCategory } from "../services/geminiService.js";
 import { getWilayah } from "../services/geoService.js";
+import { notifyDinasOfficers, notifyUser, newReportNotification, officerStatusNotification, citizenStatusNotification } from "../services/notificationService.js";
 
 const router = Router();
 const VALID_STATUSES = Object.values(LaporanStatus);
@@ -269,6 +270,14 @@ router.post("/", requireAuth, requireCitizenRole, async (req, res, next) => {
       },
     });
 
+    // Notify all officers of the responsible dinas
+    if (laporan.kategori?.dinas?.id) {
+      notifyDinasOfficers(
+        laporan.kategori.dinas.id,
+        newReportNotification(laporan.title, laporan.id, laporan.kategori.name),
+      ).catch((err) => console.error("[notification] failed to notify dinas officers:", err));
+    }
+
     res.status(201).json(laporan);
   } catch (error) {
     next(error);
@@ -327,6 +336,22 @@ router.post("/:id/status", requireAuth, requireAgencyRole, async (req, res, next
         assignedTo: { select: { id: true, name: true, image: true } },
       },
     });
+
+    // Notify the citizen who created the report
+    const dinasName = laporan.kategori?.dinas?.name || "Dinas";
+    notifyUser({
+      ...citizenStatusNotification(status, laporan.title, laporan.id, dinasName),
+      userId: laporan.createdById,
+    }).catch((err) => console.error("[notification] citizen notify failed:", err));
+
+    // Notify all dinas officers
+    const dinasId = laporan.kategori?.dinas?.id;
+    if (dinasId) {
+      notifyDinasOfficers(
+        dinasId,
+        officerStatusNotification(status, laporan.title, laporan.id, laporan.assignedTo?.name),
+      ).catch((err) => console.error("[notification] dinas notify failed:", err));
+    }
 
     res.json(laporan);
   } catch (error) {

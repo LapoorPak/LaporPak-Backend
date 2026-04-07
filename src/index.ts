@@ -12,6 +12,7 @@ import reportRouter from "./routes/reportRoutes.js";
 import agencyRouter from "./routes/agencyRoutes.js";
 import categoryRouter from "./routes/categoryRoutes.js";
 import uploadRouter from "./routes/uploadRoutes.js";
+import notificationRouter from "./routes/notificationRoutes.js";
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -36,6 +37,7 @@ app.use("/api/reports", reportRouter);
 app.use("/api/agencies", agencyRouter);
 app.use("/api/categories", categoryRouter);
 app.use("/api/upload", uploadRouter);
+app.use("/api/notifications", notificationRouter);
 
 // 6. Health check
 app.get("/api/health/live", (_req, res) => {
