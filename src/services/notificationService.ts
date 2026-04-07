@@ -24,13 +24,36 @@ export async function notifyDinasOfficers(dinasId: string, data: NotificationDat
   await prisma.notification.createMany({
     data: officers.map((o) => ({
       ...data,
+      deliveredAt: new Date(),
       userId: o.userId,
     })),
   });
 }
 
 export async function notifyUser(data: CreateNotificationInput) {
-  await prisma.notification.create({ data });
+  await prisma.notification.create({
+    data: {
+      ...data,
+      deliveredAt: new Date(),
+    },
+  });
+}
+
+export async function notifyCabangOfficers(cabangDinasId: string, data: NotificationData) {
+  const officers = await prisma.petugasDinas.findMany({
+    where: { cabangDinasId },
+    select: { userId: true },
+  });
+
+  if (officers.length === 0) return;
+
+  await prisma.notification.createMany({
+    data: officers.map((officer) => ({
+      ...data,
+      deliveredAt: new Date(),
+      userId: officer.userId,
+    })),
+  });
 }
 
 // Notification for officers when a new report is assigned to their dinas

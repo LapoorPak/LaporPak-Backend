@@ -2,17 +2,27 @@ import { Router } from "express";
 
 import { prisma } from "../config/db.js";
 import { AppError, requireAuth, requireAgencyRole, requireCitizenRole } from "../middleware/authMiddleware.js";
-import { LaporanStatus } from "../generated/prisma/client.js";
+import { LaporanStatus, Prisma } from "../generated/prisma/client.js";
 import { classifyReport, getDinasTypeForCategory } from "../services/geminiService.js";
-import { getWilayah } from "../services/geoService.js";
-import { notifyDinasOfficers, notifyUser, newReportNotification, officerStatusNotification, citizenStatusNotification } from "../services/notificationService.js";
+import { notifyCabangOfficers, notifyUser, newReportNotification, officerStatusNotification, citizenStatusNotification } from "../services/notificationService.js";
+import { resolveCabangDinas } from "../services/routingService.js";
+import { buildDataResponse, buildListResponse, parsePagination } from "../utils/apiResponse.js";
 
 const router = Router();
 const VALID_STATUSES = Object.values(LaporanStatus);
 const EARTH_RADIUS_KM = 6371;
+type ResolvedKategori = Prisma.KategoriLaporanGetPayload<{ include: { dinas: true } }>;
 
 function degreesToRadians(deg: number) {
   return deg * (Math.PI / 180);
+}
+
+function getStringQuery(value: unknown) {
+  if (Array.isArray(value)) {
+    return typeof value[0] === "string" ? value[0] : undefined;
+  }
+
+  return typeof value === "string" ? value : undefined;
 }
 
 function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: number) {
@@ -24,22 +34,151 @@ function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: numbe
   return EARTH_RADIUS_KM * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+function computeUrgencyScore(baseWeight: number, confidence: number | null) {
+  const safeWeight = Math.max(0, Math.min(100, baseWeight));
+  const safeConfidence = Math.max(0, Math.min(1, confidence ?? 0.5));
+  return Math.round(safeWeight * 0.75 + safeConfidence * 25);
+}
+
+function buildRoutingMeta(routing: Awaited<ReturnType<typeof resolveCabangDinas>>) {
+  return {
+    routingSource: routing.routingSource,
+    wilayah: routing.wilayah,
+    wilayahMatched: routing.wilayahMatched,
+    distanceKm: routing.distanceKm,
+    reasoning: routing.reasoning,
+    candidateCabang: routing.candidateCabang,
+  };
+}
+
+async function createRoutingDecision(input: {
+  laporanId: string;
+  kategoriId: string;
+  dinasId: string | null;
+  cabangDinasId: string | null;
+  source: string;
+  confidence: number | null;
+  urgencyScore: number | null;
+  suggestedSlaHours: number | null;
+  distanceKm: number | null;
+  wilayahMatched: string | null;
+  reasoning: string | null;
+  candidateCabang: unknown;
+}) {
+  await prisma.laporanRoutingDecision.create({
+    data: {
+      laporanId: input.laporanId,
+      kategoriId: input.kategoriId,
+      dinasId: input.dinasId,
+      cabangDinasId: input.cabangDinasId,
+      source: input.source,
+      confidence: input.confidence,
+      urgencyScore: input.urgencyScore,
+      suggestedSlaHours: input.suggestedSlaHours,
+      distanceKm: input.distanceKm,
+      wilayahMatched: input.wilayahMatched,
+      reasoning: input.reasoning,
+      candidateCabang: input.candidateCabang as Prisma.InputJsonValue,
+    },
+  });
+}
+
+async function getReportStats(where: Prisma.LaporanWhereInput) {
+  const [groupedByStatus, groupedByCategory] = await Promise.all([
+    prisma.laporan.groupBy({
+      by: ["status"],
+      where,
+      _count: {
+        _all: true,
+      },
+    }),
+    prisma.laporan.groupBy({
+      by: ["kategoriId"],
+      where,
+      _count: {
+        _all: true,
+      },
+    }),
+  ]);
+
+  const categoryIds = groupedByCategory.map((entry) => entry.kategoriId);
+  const categories = categoryIds.length
+    ? await prisma.kategoriLaporan.findMany({
+        where: { id: { in: categoryIds } },
+        select: { id: true, code: true, name: true },
+      })
+    : [];
+  const categoryMap = new Map(categories.map((category) => [category.id, category]));
+
+  return {
+    byStatus: groupedByStatus.map((entry) => ({
+      status: entry.status,
+      total: entry._count._all,
+    })),
+    byCategory: groupedByCategory.map((entry) => ({
+      kategoriId: entry.kategoriId,
+      kategoriCode: categoryMap.get(entry.kategoriId)?.code ?? null,
+      kategoriName: categoryMap.get(entry.kategoriId)?.name ?? null,
+      total: entry._count._all,
+    })),
+  };
+}
+
+function getInMemoryReportStats(
+  laporan: Array<{
+    status: string;
+    kategoriId: string;
+    kategori: { code: string; name: string };
+  }>,
+) {
+  const byStatusMap = new Map<string, number>();
+  const byCategoryMap = new Map<
+    string,
+    { kategoriId: string; kategoriCode: string; kategoriName: string; total: number }
+  >();
+
+  for (const item of laporan) {
+    byStatusMap.set(item.status, (byStatusMap.get(item.status) ?? 0) + 1);
+
+    const categoryEntry = byCategoryMap.get(item.kategoriId);
+    if (categoryEntry) {
+      categoryEntry.total += 1;
+    } else {
+      byCategoryMap.set(item.kategoriId, {
+        kategoriId: item.kategoriId,
+        kategoriCode: item.kategori.code,
+        kategoriName: item.kategori.name,
+        total: 1,
+      });
+    }
+  }
+
+  return {
+    byStatus: Array.from(byStatusMap.entries()).map(([status, total]) => ({
+      status,
+      total,
+    })),
+    byCategory: Array.from(byCategoryMap.values()),
+  };
+}
+
 // GET /api/reports
 router.get("/", async (req, res, next) => {
   try {
-    const page = Math.max(1, Number(req.query.page) || 1);
-    const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 10));
-    const skip = (page - 1) * limit;
-    const status = req.query.status as string | undefined;
-    const kategoriId = req.query.kategoriId as string | undefined;
-    const search = req.query.search as string | undefined;
+    const pagination = parsePagination(req.query, { defaultLimit: 10, maxLimit: 100 });
+    const status = getStringQuery(req.query.status);
+    const kategoriId = getStringQuery(req.query.kategoriId);
+    const search = getStringQuery(req.query.search);
+    if (status && !VALID_STATUSES.includes(status as (typeof VALID_STATUSES)[number])) {
+      throw new AppError(`Invalid status. Must be one of: ${VALID_STATUSES.join(", ")}`, 400);
+    }
 
-    const where: any = {};
-    if (status) where.status = status;
+    const where: Prisma.LaporanWhereInput = {};
+    if (status) where.status = status as (typeof VALID_STATUSES)[number];
     if (kategoriId) where.kategoriId = kategoriId;
     if (search) where.title = { contains: search, mode: "insensitive" };
 
-    const [laporan, total] = await Promise.all([
+    const [laporan, total, stats] = await Promise.all([
       prisma.laporan.findMany({
         where,
         include: {
@@ -48,19 +187,14 @@ router.get("/", async (req, res, next) => {
           createdBy: { select: { id: true, name: true, image: true } },
         },
         orderBy: { createdAt: "desc" },
-        skip,
-        take: limit,
+        skip: pagination.skip,
+        take: pagination.take,
       }),
       prisma.laporan.count({ where }),
+      getReportStats(where),
     ]);
 
-    res.json({
-      laporan,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    });
+    res.json(buildListResponse(laporan, pagination, total, stats));
   } catch (error) {
     next(error);
   }
@@ -69,13 +203,21 @@ router.get("/", async (req, res, next) => {
 // GET /api/reports/me — MUST be before /:id
 router.get("/me", requireAuth, async (req, res, next) => {
   try {
-    const page = Math.max(1, Number(req.query.page) || 1);
-    const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 10));
-    const skip = (page - 1) * limit;
+    const pagination = parsePagination(req.query, { defaultLimit: 10, maxLimit: 100 });
+    const status = getStringQuery(req.query.status);
+    const kategoriId = getStringQuery(req.query.kategoriId);
+    const search = getStringQuery(req.query.search);
+    if (status && !VALID_STATUSES.includes(status as (typeof VALID_STATUSES)[number])) {
+      throw new AppError(`Invalid status. Must be one of: ${VALID_STATUSES.join(", ")}`, 400);
+    }
+    const where: Prisma.LaporanWhereInput = {
+      createdById: req.user.id,
+      ...(status ? { status: status as (typeof VALID_STATUSES)[number] } : {}),
+      ...(kategoriId ? { kategoriId } : {}),
+      ...(search ? { title: { contains: search, mode: "insensitive" } } : {}),
+    };
 
-    const where = { createdById: req.user.id };
-
-    const [laporan, total] = await Promise.all([
+    const [laporan, total, stats] = await Promise.all([
       prisma.laporan.findMany({
         where,
         include: {
@@ -83,19 +225,14 @@ router.get("/me", requireAuth, async (req, res, next) => {
           cabangDinas: { include: { dinas: true } },
         },
         orderBy: { createdAt: "desc" },
-        skip,
-        take: limit,
+        skip: pagination.skip,
+        take: pagination.take,
       }),
       prisma.laporan.count({ where }),
+      getReportStats(where),
     ]);
 
-    res.json({
-      laporan,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    });
+    res.json(buildListResponse(laporan, pagination, total, stats));
   } catch (error) {
     next(error);
   }
@@ -104,6 +241,7 @@ router.get("/me", requireAuth, async (req, res, next) => {
 // GET /api/reports/nearby
 router.get("/nearby", async (req, res, next) => {
   try {
+    const pagination = parsePagination(req.query, { defaultLimit: 10, maxLimit: 100 });
     const lat = Number(req.query.lat);
     const lng = Number(req.query.lng);
     const radius = Number(req.query.radius) || 5;
@@ -130,11 +268,26 @@ router.get("/nearby", async (req, res, next) => {
     });
 
     // Post-filter with haversine for accuracy
-    const laporan = reports.filter(
+    const nearbyReports = reports.filter(
       (r) => haversineDistance(lat, lng, r.latitude, r.longitude) <= radius,
     );
 
-    res.json(laporan);
+    const paginatedReports = nearbyReports.slice(
+      pagination.skip,
+      pagination.skip + pagination.take,
+    );
+    const stats = getInMemoryReportStats(
+      nearbyReports.map((report) => ({
+        status: report.status,
+        kategoriId: report.kategoriId,
+        kategori: {
+          code: report.kategori.code,
+          name: report.kategori.name,
+        },
+      })),
+    );
+
+    res.json(buildListResponse(paginatedReports, pagination, nearbyReports.length, stats));
   } catch (error) {
     next(error);
   }
@@ -156,20 +309,26 @@ router.post("/classify-preview", requireAuth, async (req, res, next) => {
       include: { dinas: true },
     });
 
-    // If coordinates provided, resolve the specific branch office by wilayah
-    let assignedCabang = null;
+    let routing = null;
     if (latitude != null && longitude != null) {
-      const dinasType = getDinasTypeForCategory(result.categoryCode);
-      const wilayah = getWilayah(Number(latitude), Number(longitude));
-      if (dinasType && wilayah) {
-        assignedCabang = await prisma.cabangDinas.findFirst({
-          where: { dinas: { type: dinasType }, wilayah },
-          include: { dinas: true },
+      const dinasType = kategori?.dinas?.type || getDinasTypeForCategory(result.categoryCode);
+      if (dinasType) {
+        routing = await resolveCabangDinas({
+          dinasType,
+          latitude: Number(latitude),
+          longitude: Number(longitude),
         });
       }
     }
 
-    res.json({ ...result, kategori, assignedCabang, wilayah: latitude != null && longitude != null ? getWilayah(Number(latitude), Number(longitude)) : null });
+    res.json(
+      buildDataResponse({
+        ...result,
+        kategori,
+        assignedCabang: routing?.assignedCabang ?? null,
+        routing,
+      }),
+    );
   } catch (error) {
     next(error);
   }
@@ -184,7 +343,9 @@ router.post("/", requireAuth, requireCitizenRole, async (req, res, next) => {
       throw new AppError("title, description, latitude, and longitude are required", 400);
     }
 
-    let resolvedKategoriId: string;
+    const latitudeValue = Number(latitude);
+    const longitudeValue = Number(longitude);
+    let resolvedKategori: ResolvedKategori | null = null;
     let dinasType: string | undefined;
     let aiConfidence: number | null = null;
     let aiReasoning: string | null = null;
@@ -200,7 +361,7 @@ router.post("/", requireAuth, requireCitizenRole, async (req, res, next) => {
         throw new AppError("Invalid kategoriId", 400);
       }
 
-      resolvedKategoriId = kategoriId;
+      resolvedKategori = kategori;
       dinasType = kategori.dinas.type || kategori.dinas.code;
     } else {
       try {
@@ -208,14 +369,15 @@ router.post("/", requireAuth, requireCitizenRole, async (req, res, next) => {
 
         const kategori = await prisma.kategoriLaporan.findUnique({
           where: { code: result.categoryCode },
+          include: { dinas: true },
         });
 
         if (!kategori) {
           throw new Error("AI returned unknown category code");
         }
 
-        resolvedKategoriId = kategori.id;
-        dinasType = getDinasTypeForCategory(result.categoryCode);
+        resolvedKategori = kategori;
+        dinasType = kategori.dinas.type || kategori.dinas.code || getDinasTypeForCategory(result.categoryCode);
         aiConfidence = result.confidence;
         aiReasoning = result.reasoning;
         aiClassified = true;
@@ -228,40 +390,42 @@ router.post("/", requireAuth, requireCitizenRole, async (req, res, next) => {
       }
     }
 
-    // Resolve the specific branch office by dinas type + wilayah (geographic lookup)
-    let cabangDinasId: string | null = null;
+    let routing = null;
     if (dinasType) {
-      const wilayah = getWilayah(Number(latitude), Number(longitude));
-      if (wilayah) {
-        const cabang = await prisma.cabangDinas.findFirst({
-          where: { dinas: { type: dinasType }, wilayah },
-        });
-        if (cabang) cabangDinasId = cabang.id;
-      }
-
-      // Fallback: if no wilayah match, pick any branch of this dinas type
-      if (!cabangDinasId) {
-        const cabang = await prisma.cabangDinas.findFirst({
-          where: { dinas: { type: dinasType } },
-        });
-        if (cabang) cabangDinasId = cabang.id;
-      }
+      routing = await resolveCabangDinas({
+        dinasType,
+        latitude: latitudeValue,
+        longitude: longitudeValue,
+      });
     }
+
+    const urgencyScore = computeUrgencyScore(
+      resolvedKategori?.urgencyWeight ?? 50,
+      aiConfidence,
+    );
+    const suggestedSlaHours = resolvedKategori?.slaHours ?? null;
 
     const laporan = await prisma.laporan.create({
       data: {
         title,
         description,
-        kategoriId: resolvedKategoriId,
-        cabangDinasId,
-        latitude: Number(latitude),
-        longitude: Number(longitude),
+        kategoriId: resolvedKategori!.id,
+        cabangDinasId: routing?.assignedCabang?.id ?? null,
+        latitude: latitudeValue,
+        longitude: longitudeValue,
         address: address || null,
         images: images || [],
         createdById: req.user.id,
+        routingStatus: routing?.routingStatus ?? "manual_review",
         aiConfidence,
         aiReasoning,
         aiClassified,
+        aiUrgencyScore: urgencyScore,
+        aiSuggestedSlaHours: suggestedSlaHours,
+        aiAssignedBranchReason: routing?.reasoning ?? aiReasoning,
+        aiRouteMeta: routing
+          ? (buildRoutingMeta(routing) as unknown as Prisma.InputJsonValue)
+          : Prisma.JsonNull,
       },
       include: {
         kategori: { include: { dinas: true } },
@@ -270,15 +434,29 @@ router.post("/", requireAuth, requireCitizenRole, async (req, res, next) => {
       },
     });
 
-    // Notify all officers of the responsible dinas
-    if (laporan.kategori?.dinas?.id) {
-      notifyDinasOfficers(
-        laporan.kategori.dinas.id,
-        newReportNotification(laporan.title, laporan.id, laporan.kategori.name),
-      ).catch((err) => console.error("[notification] failed to notify dinas officers:", err));
+    await createRoutingDecision({
+      laporanId: laporan.id,
+      kategoriId: resolvedKategori!.id,
+      dinasId: resolvedKategori?.dinasId ?? null,
+      cabangDinasId: routing?.assignedCabang?.id ?? null,
+      source: routing?.routingSource ?? (aiClassified ? "ai_without_branch" : "manual_category"),
+      confidence: aiConfidence,
+      urgencyScore,
+      suggestedSlaHours,
+      distanceKm: routing?.distanceKm ?? null,
+      wilayahMatched: routing?.wilayahMatched ?? routing?.wilayah ?? null,
+      reasoning: routing?.reasoning ?? aiReasoning,
+      candidateCabang: routing?.candidateCabang ?? [],
+    });
+
+    if (routing?.assignedCabang?.id) {
+      notifyCabangOfficers(
+        routing.assignedCabang.id,
+        newReportNotification(laporan.title, laporan.id, resolvedKategori!.name),
+      ).catch((err) => console.error("[notification] failed to notify cabang officers:", err));
     }
 
-    res.status(201).json(laporan);
+    res.status(201).json(buildDataResponse(laporan));
   } catch (error) {
     next(error);
   }
@@ -302,7 +480,7 @@ router.get("/:id", async (req, res, next) => {
       throw new AppError("Report not found", 404);
     }
 
-    res.json(laporan);
+    res.json(buildDataResponse(laporan));
   } catch (error) {
     next(error);
   }
@@ -312,7 +490,7 @@ router.get("/:id", async (req, res, next) => {
 router.post("/:id/status", requireAuth, requireAgencyRole, async (req, res, next) => {
   try {
     const id = req.params.id as string;
-    const { status } = req.body;
+    const { status, resolutionNote } = req.body;
 
     if (!status || !VALID_STATUSES.includes(status)) {
       throw new AppError(`Invalid status. Must be one of: ${VALID_STATUSES.join(", ")}`, 400);
@@ -328,7 +506,12 @@ router.post("/:id/status", requireAuth, requireAgencyRole, async (req, res, next
 
     const laporan = await prisma.laporan.update({
       where: { id },
-      data: { status },
+      data: {
+        status,
+        resolvedAt: status === "resolved" ? new Date() : null,
+        resolvedById: status === "resolved" ? req.user.id : null,
+        resolutionNote: status === "resolved" ? String(resolutionNote || "") || null : null,
+      },
       include: {
         kategori: { include: { dinas: true } },
         cabangDinas: { include: { dinas: true } },
@@ -344,16 +527,63 @@ router.post("/:id/status", requireAuth, requireAgencyRole, async (req, res, next
       userId: laporan.createdById,
     }).catch((err) => console.error("[notification] citizen notify failed:", err));
 
-    // Notify all dinas officers
-    const dinasId = laporan.kategori?.dinas?.id;
-    if (dinasId) {
-      notifyDinasOfficers(
-        dinasId,
+    if (laporan.cabangDinas?.id) {
+      notifyCabangOfficers(
+        laporan.cabangDinas.id,
         officerStatusNotification(status, laporan.title, laporan.id, laporan.assignedTo?.name),
-      ).catch((err) => console.error("[notification] dinas notify failed:", err));
+      ).catch((err) => console.error("[notification] cabang notify failed:", err));
     }
 
-    res.json(laporan);
+    res.json(buildDataResponse(laporan));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/reports/:id/resolve
+router.post("/:id/resolve", requireAuth, requireAgencyRole, async (req, res, next) => {
+  try {
+    const id = req.params.id as string;
+    const { resolutionNote } = req.body;
+
+    const existing = await prisma.laporan.findUnique({
+      where: { id },
+    });
+
+    if (!existing) {
+      throw new AppError("Report not found", 404);
+    }
+
+    const laporan = await prisma.laporan.update({
+      where: { id },
+      data: {
+        status: "resolved",
+        resolvedAt: new Date(),
+        resolvedById: req.user.id,
+        resolutionNote: String(resolutionNote || "") || null,
+      },
+      include: {
+        kategori: { include: { dinas: true } },
+        cabangDinas: { include: { dinas: true } },
+        createdBy: { select: { id: true, name: true, image: true } },
+        assignedTo: { select: { id: true, name: true, image: true } },
+      },
+    });
+
+    const dinasName = laporan.kategori?.dinas?.name || "Dinas";
+    notifyUser({
+      ...citizenStatusNotification("resolved", laporan.title, laporan.id, dinasName),
+      userId: laporan.createdById,
+    }).catch((err) => console.error("[notification] citizen notify failed:", err));
+
+    if (laporan.cabangDinas?.id) {
+      notifyCabangOfficers(
+        laporan.cabangDinas.id,
+        officerStatusNotification("resolved", laporan.title, laporan.id, laporan.assignedTo?.name),
+      ).catch((err) => console.error("[notification] cabang notify failed:", err));
+    }
+
+    res.json(buildDataResponse(laporan));
   } catch (error) {
     next(error);
   }
@@ -388,7 +618,7 @@ router.post("/:id/assign", requireAuth, requireAgencyRole, async (req, res, next
       },
     });
 
-    res.json(laporan);
+    res.json(buildDataResponse(laporan));
   } catch (error) {
     next(error);
   }

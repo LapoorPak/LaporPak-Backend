@@ -1,33 +1,20 @@
 import { GoogleGenAI } from "@google/genai";
 import fs from "fs";
 import path from "path";
+import { REPORT_CATEGORIES } from "../data/reportCategories.js";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+const CATEGORIES = REPORT_CATEGORIES.map((category) => ({
+  code: category.code,
+  name: category.name,
+  dinas: category.dinasCode,
+  desc: category.description,
+}));
 
-const CATEGORIES = [
-  { code: "jalan_rusak", name: "Jalan Rusak", dinas: "dinas_pu", desc: "Damaged roads, potholes, cracked pavement" },
-  { code: "jembatan_rusak", name: "Jembatan Rusak", dinas: "dinas_pu", desc: "Damaged bridges, broken railings" },
-  { code: "drainase_tersumbat", name: "Drainase Tersumbat", dinas: "dinas_pu", desc: "Clogged drains, blocked waterways" },
-  { code: "trotoar_rusak", name: "Trotoar Rusak", dinas: "dinas_pu", desc: "Damaged sidewalks, pedestrian paths" },
-  { code: "bangunan_publik_rusak", name: "Bangunan Publik Rusak", dinas: "dinas_pu", desc: "Damaged public buildings" },
-  { code: "sampah_menumpuk", name: "Sampah Menumpuk", dinas: "dlhk", desc: "Accumulated garbage, overflowing bins" },
-  { code: "pencemaran_air", name: "Pencemaran Air", dinas: "dlhk", desc: "Water pollution, contaminated water" },
-  { code: "pencemaran_udara", name: "Pencemaran Udara", dinas: "dlhk", desc: "Air pollution, smog, burning waste" },
-  { code: "pohon_tumbang", name: "Pohon Tumbang", dinas: "dlhk", desc: "Fallen trees blocking roads or areas" },
-  { code: "sampah_sungai", name: "Sampah Sungai", dinas: "dlhk", desc: "River trash, waste in waterways" },
-  { code: "banjir", name: "Banjir", dinas: "bpbd", desc: "Flooding, submerged roads or areas" },
-  { code: "tanah_longsor", name: "Tanah Longsor", dinas: "bpbd", desc: "Landslides, earth movement" },
-  { code: "kebakaran", name: "Kebakaran", dinas: "bpbd", desc: "Fires, burning buildings or areas" },
-  { code: "bencana_lain", name: "Bencana Lain", dinas: "bpbd", desc: "Other disasters not listed above" },
-  { code: "lampu_jalan_mati", name: "Lampu Jalan Mati", dinas: "dishub", desc: "Broken or non-functioning street lights" },
-  { code: "rambu_lalulintas", name: "Rambu Lalu Lintas", dinas: "dishub", desc: "Damaged or missing traffic signs" },
-  { code: "kemacetan", name: "Kemacetan", dinas: "dishub", desc: "Traffic congestion, road blockages" },
-  { code: "listrik_padam", name: "Listrik Padam", dinas: "pln", desc: "Power outages, electricity failure" },
-  { code: "kabel_bahaya", name: "Kabel Bahaya", dinas: "pln", desc: "Dangerous exposed electrical cables" },
-] as const;
-
-const VALID_CODES = new Set(CATEGORIES.map((c) => c.code));
-const CATEGORY_DINAS_MAP = new Map<string, string>(CATEGORIES.map((c) => [c.code, c.dinas]));
+const VALID_CODES = new Set(REPORT_CATEGORIES.map((category) => category.code));
+const CATEGORY_DINAS_MAP = new Map(
+  REPORT_CATEGORIES.map((category) => [category.code, category.dinasCode]),
+);
 
 export function getDinasTypeForCategory(categoryCode: string): string | undefined {
   return CATEGORY_DINAS_MAP.get(categoryCode);

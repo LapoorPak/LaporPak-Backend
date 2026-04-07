@@ -8,10 +8,11 @@ import { prisma } from "./db.js";
 
 const betterAuthUrl = process.env.BETTER_AUTH_URL || "http://localhost:3000";
 const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
+const isSecureDeployment = betterAuthUrl.startsWith("https://");
 const agencyRoleErrorMessage =
-  "Akun Anda adalah akun warga. Silakan login melalui portal warga.";
+  "Terjadi kesalahan saat login. Pastikan portal sesuai.";
 const citizenRoleErrorMessage =
-  "Akun Anda adalah akun pemerintah. Silakan login melalui portal dinas.";
+  "Terjadi kesalahan saat login. Pastikan portal sesuai.";
 const AGENCY_PORTAL = "agency";
 const CITIZEN_PORTAL = "citizen";
 const PORTAL_ERROR_COOKIE = "lp_portal_error";
@@ -152,6 +153,12 @@ export const auth = betterAuth({
   account: {
     storeStateStrategy: "database",
     skipStateCookieCheck: true,
+  },
+  advanced: {
+    useSecureCookies: isSecureDeployment,
+    defaultCookieAttributes: {
+      sameSite: isSecureDeployment ? "none" : "lax",
+    },
   },
   emailAndPassword: {
     enabled: true,

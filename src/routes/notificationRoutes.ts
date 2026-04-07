@@ -3,6 +3,7 @@ import { Router } from "express";
 import { prisma } from "../config/db.js";
 import { AppError, requireAuth } from "../middleware/authMiddleware.js";
 import { formatRelativeTime } from "../services/notificationService.js";
+import { buildDataResponse, buildListResponse, parsePagination } from "../utils/apiResponse.js";
 
 const router = Router();
 
@@ -11,24 +12,29 @@ router.get("/", requireAuth, async (req, res, next) => {
   try {
     const userId = req.user.id;
     const unread = req.query.unread === "true";
-    const page = Math.max(1, Number(req.query.page) || 1);
-    const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
-    const skip = (page - 1) * limit;
+    const pagination = parsePagination(req.query, { defaultLimit: 20, maxLimit: 100 });
 
     const where = {
       userId,
       ...(unread && { isRead: false }),
     };
 
-    const [notifications, total, unreadCount] = await Promise.all([
+    const [notifications, total, unreadCount, groupedByType] = await Promise.all([
       prisma.notification.findMany({
         where,
         orderBy: { createdAt: "desc" },
-        skip,
-        take: limit,
+        skip: pagination.skip,
+        take: pagination.take,
       }),
       prisma.notification.count({ where }),
       prisma.notification.count({ where: { userId, isRead: false } }),
+      prisma.notification.groupBy({
+        by: ["type"],
+        where,
+        _count: {
+          _all: true,
+        },
+      }),
     ]);
 
     const mapped = notifications.map((n) => ({
@@ -42,14 +48,15 @@ router.get("/", requireAuth, async (req, res, next) => {
       laporanId: n.laporanId,
     }));
 
-    res.json({
-      notifications: mapped,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-      unreadCount,
-    });
+    res.json(
+      buildListResponse(mapped, pagination, total, {
+        unreadCount,
+        byType: groupedByType.map((entry) => ({
+          type: entry.type,
+          total: entry._count._all,
+        })),
+      }),
+    );
   } catch (error) {
     next(error);
   }
@@ -62,7 +69,11 @@ router.get("/unread-count", requireAuth, async (req, res, next) => {
       where: { userId: req.user.id, isRead: false },
     });
 
-    res.json({ count });
+    res.json(
+      buildDataResponse({
+        unreadCount: count,
+      }),
+    );
   } catch (error) {
     next(error);
   }
@@ -71,8 +82,10 @@ router.get("/unread-count", requireAuth, async (req, res, next) => {
 // PATCH /api/notifications/:id/read
 router.patch("/:id/read", requireAuth, async (req, res, next) => {
   try {
+    const notificationId = String(req.params.id);
+
     const notification = await prisma.notification.findUnique({
-      where: { id: req.params.id },
+      where: { id: notificationId },
     });
 
     if (!notification) {
@@ -84,8 +97,8 @@ router.patch("/:id/read", requireAuth, async (req, res, next) => {
     }
 
     await prisma.notification.update({
-      where: { id: req.params.id },
-      data: { isRead: true },
+      where: { id: notificationId },
+      data: { isRead: true, readAt: new Date() },
     });
 
     res.json({ success: true });
@@ -99,7 +112,7 @@ router.patch("/read-all", requireAuth, async (req, res, next) => {
   try {
     const result = await prisma.notification.updateMany({
       where: { userId: req.user.id, isRead: false },
-      data: { isRead: true },
+      data: { isRead: true, readAt: new Date() },
     });
 
     res.json({ success: true, count: result.count });
