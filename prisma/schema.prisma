@@ -27,6 +27,7 @@ model User {
   createdReports  Laporan[]      @relation("ReportCreator")
   assignedReports Laporan[]      @relation("ReportAssignee")
   petugas         PetugasDinas?
+  notifications   Notification[]
 
   @@map("user")
 }
@@ -161,8 +162,38 @@ model Laporan {
   @@index([createdById])
   @@index([kategoriId, status])
   @@index([cabangDinasId, status])
+  notifications Notification[]
+
   @@index([latitude, longitude])
   @@map("laporan")
+}
+
+enum NotificationType {
+  success
+  warning
+  danger
+  info
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  type      NotificationType
+  title     String
+  message   String
+  tag       String
+  isRead    Boolean          @default(false)
+
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  laporanId String?
+  laporan   Laporan?         @relation(fields: [laporanId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime         @default(now())
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+  @@map("notification")
 }
 
 model PetugasDinas {
