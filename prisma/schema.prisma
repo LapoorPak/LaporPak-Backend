@@ -21,8 +21,13 @@ model User {
   banExpires    DateTime?
   phone         String?
 
-  sessions Session[]
-  accounts Account[]
+  sessions        Session[]
+  accounts        Account[]
+  
+  createdReports  Laporan[]      @relation("ReportCreator")
+  assignedReports Laporan[]      @relation("ReportAssignee")
+  petugas         PetugasDinas?
+  notifications   Notification[]
 
   @@map("user")
 }
@@ -46,7 +51,6 @@ model Account {
   accountId             String
   providerId            String
   userId                String
-  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   accessToken           String?
   refreshToken          String?
   idToken               String?
@@ -56,17 +60,149 @@ model Account {
   password              String?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("account")
 }
 
 model Verification {
-  id         String    @id
+  id         String   @id
   identifier String
   value      String
   expiresAt  DateTime
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   @@map("verification")
+}
+
+enum LaporanStatus {
+  pending
+  verified
+  in_progress
+  resolved
+  rejected
+}
+
+model Dinas {
+  id      String  @id @default(cuid())
+  code    String  @unique
+  type    String    @default("")
+  name    String
+  short   String
+  wilayah String?
+
+  kategori   KategoriLaporan[]
+  cabang     CabangDinas[]
+
+  @@index([type, wilayah])
+  @@map("dinas")
+}
+
+model CabangDinas {
+  id        String  @id @default(cuid())
+  name      String
+  wilayah   String
+  address   String?
+  latitude  Float?
+  longitude Float?
+  phone     String?
+
+  dinasId   String
+  dinas     Dinas   @relation(fields: [dinasId], references: [id])
+
+  petugas   PetugasDinas[]
+  laporan   Laporan[]
+
+  @@index([dinasId, wilayah])
+  @@map("cabang_dinas")
+}
+
+model KategoriLaporan {
+  id      String @id @default(cuid())
+  code    String @unique
+  name    String
+  dinasId String
+  dinas   Dinas  @relation(fields: [dinasId], references: [id])
+
+  laporan Laporan[]
+
+  @@map("kategori_laporan")
+}
+
+model Laporan {
+  id          String        @id @default(cuid())
+  title       String
+  description String
+  status      LaporanStatus @default(pending)
+  images      String[]
+  latitude    Float
+  longitude   Float
+  address     String?
+
+  kategoriId  String
+  kategori    KategoriLaporan @relation(fields: [kategoriId], references: [id])
+
+  cabangDinasId String?
+  cabangDinas   CabangDinas? @relation(fields: [cabangDinasId], references: [id])
+
+  createdById String
+  createdBy   User @relation("ReportCreator", fields: [createdById], references: [id])
+
+  assignedToId String?
+  assignedTo   User? @relation("ReportAssignee", fields: [assignedToId], references: [id])
+
+  aiConfidence Float?
+  aiReasoning  String?
+  aiClassified Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([createdById])
+  @@index([kategoriId, status])
+  @@index([cabangDinasId, status])
+  notifications Notification[]
+
+  @@index([latitude, longitude])
+  @@map("laporan")
+}
+
+enum NotificationType {
+  success
+  warning
+  danger
+  info
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  type      NotificationType
+  title     String
+  message   String
+  tag       String
+  isRead    Boolean          @default(false)
+
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  laporanId String?
+  laporan   Laporan?         @relation(fields: [laporanId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime         @default(now())
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+  @@map("notification")
+}
+
+model PetugasDinas {
+  id            String      @id @default(cuid())
+  nip           String      @unique
+  userId        String      @unique
+  user          User        @relation(fields: [userId], references: [id])
+  cabangDinasId String
+  cabangDinas   CabangDinas @relation(fields: [cabangDinasId], references: [id])
+
+  @@map("petugas_dinas")
 }

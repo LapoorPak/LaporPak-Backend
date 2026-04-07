@@ -2,11 +2,17 @@ import "dotenv/config";
 import express from "express";
 import helmet from "helmet";
 import { toNodeHandler } from "better-auth/node";
+
 import { auth } from "./config/auth.js";
 import { corsMiddleware } from "./config/cors.js";
 import { getHealthSnapshot } from "./config/health.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { requestLogger } from "./middleware/requestLogger.js";
+import reportRouter from "./routes/reportRoutes.js";
+import agencyRouter from "./routes/agencyRoutes.js";
+import categoryRouter from "./routes/categoryRoutes.js";
+import uploadRouter from "./routes/uploadRoutes.js";
+import notificationRouter from "./routes/notificationRoutes.js";
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -19,11 +25,21 @@ app.use(requestLogger);
 app.all("/api/auth/*splat", toNodeHandler(auth));
 
 // 3. Other middleware AFTER Better Auth
-app.use(helmet());
+app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// 4. Health check
+// 4. Static files for uploads
+app.use("/uploads", express.static("uploads"));
+
+// 5. API routes
+app.use("/api/reports", reportRouter);
+app.use("/api/agencies", agencyRouter);
+app.use("/api/categories", categoryRouter);
+app.use("/api/upload", uploadRouter);
+app.use("/api/notifications", notificationRouter);
+
+// 6. Health check
 app.get("/api/health/live", (_req, res) => {
   res.status(200).json({
     status: "ok",
@@ -40,7 +56,7 @@ app.get("/api/health", async (_req, res, next) => {
   }
 });
 
-// 5. Error handler (must be last)
+// 7. Error handler (must be last)
 app.use(errorHandler);
 
 // Start server
