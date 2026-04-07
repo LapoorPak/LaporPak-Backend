@@ -176,11 +176,16 @@ model Laporan {
   latitude              Float
   longitude             Float
   address               String?
-  kategoriId            String
+  kategoriId            String?
   cabangDinasId         String?
   createdById           String
   assignedToId          String?
   resolvedById          String?
+  aiDecisionStatus      String?
+  aiRejectionCode       String?
+  aiSuggestedRewrite    String?
+  aiClarityScore        Int?
+  aiSeriousnessScore    Int?
   aiConfidence          Float?
   aiReasoning           String?
   aiClassified          Boolean              @default(false)
@@ -193,7 +198,7 @@ model Laporan {
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
 
-  kategori    KategoriLaporan @relation(fields: [kategoriId], references: [id])
+  kategori    KategoriLaporan? @relation(fields: [kategoriId], references: [id], onDelete: SetNull)
   cabangDinas CabangDinas?    @relation(fields: [cabangDinasId], references: [id])
   createdBy   User            @relation("ReportCreator", fields: [createdById], references: [id])
   assignedTo  User?           @relation("ReportAssignee", fields: [assignedToId], references: [id])

@@ -141,6 +141,20 @@ export function citizenStatusNotification(
   return { ...map[status], laporanId };
 }
 
+export function aiRejectedReportNotification(
+  laporanTitle: string,
+  laporanId: string,
+  rejectionReason: string,
+): NotificationData {
+  return {
+    type: "danger",
+    title: "Laporan Ditolak AI",
+    tag: "Ditolak",
+    message: `Laporan "${laporanTitle}" ditolak AI. Alasan: ${rejectionReason}`,
+    laporanId,
+  };
+}
+
 export function formatRelativeTime(date: Date): string {
   const diffMs = Date.now() - date.getTime();
   const diffSec = Math.floor(diffMs / 1000);

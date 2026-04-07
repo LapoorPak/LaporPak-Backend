@@ -1,7 +1,7 @@
 import { Router } from "express";
 
 import { prisma } from "../config/db.js";
-import { LaporanStatus } from "../generated/prisma/client.js";
+import { LaporanStatus, Prisma } from "../generated/prisma/client.js";
 import { AppError } from "../middleware/authMiddleware.js";
 import { buildDataResponse, buildListResponse, parsePagination } from "../utils/apiResponse.js";
 
@@ -16,84 +16,169 @@ function getStringQuery(value: unknown) {
   return typeof value === "string" ? value : undefined;
 }
 
-async function getAgencyMapPins(params: { skip: number; take: number }) {
-  const offices = await prisma.cabangDinas.findMany({
-    where: {
+function buildAgencyLocationWhere(input: {
+  search?: string;
+  type?: string;
+  dinasId?: string;
+  cityRegency?: string;
+  wilayah?: string;
+}): Prisma.CabangDinasWhereInput {
+  const filters: Prisma.CabangDinasWhereInput[] = [
+    {
       isRoutingEnabled: true,
       latitude: { not: null },
       longitude: { not: null },
-      dinas: { isActive: true },
+      dinas: {
+        isActive: true,
+        ...(input.type ? { type: input.type } : {}),
+        ...(input.dinasId ? { id: input.dinasId } : {}),
+      },
     },
-    include: { dinas: true },
-    orderBy: { name: "asc" },
-    skip: params.skip,
-    take: params.take,
-  });
+  ];
 
-  return offices.map((office) => ({
+  if (input.cityRegency) {
+    filters.push({
+      cityRegency: {
+        contains: input.cityRegency,
+        mode: "insensitive",
+      },
+    });
+  }
+
+  if (input.wilayah) {
+    filters.push({
+      wilayah: {
+        contains: input.wilayah,
+        mode: "insensitive",
+      },
+    });
+  }
+
+  if (input.search) {
+    filters.push({
+      OR: [
+        { name: { contains: input.search, mode: "insensitive" } },
+        { address: { contains: input.search, mode: "insensitive" } },
+        { wilayah: { contains: input.search, mode: "insensitive" } },
+        { cityRegency: { contains: input.search, mode: "insensitive" } },
+        { province: { contains: input.search, mode: "insensitive" } },
+        { dinas: { name: { contains: input.search, mode: "insensitive" } } },
+        { dinas: { short: { contains: input.search, mode: "insensitive" } } },
+        { dinas: { code: { contains: input.search, mode: "insensitive" } } },
+        { dinas: { type: { contains: input.search, mode: "insensitive" } } },
+      ],
+    });
+  }
+
+  return filters.length === 1 ? filters[0] : { AND: filters };
+}
+
+async function getAgencyLocationStats(where: Prisma.CabangDinasWhereInput) {
+  const [groupedByDinas, groupedByCityRegency] = await Promise.all([
+    prisma.cabangDinas.groupBy({
+      by: ["dinasId"],
+      where,
+      _count: {
+        _all: true,
+      },
+    }),
+    prisma.cabangDinas.groupBy({
+      by: ["cityRegency"],
+      where,
+      _count: {
+        _all: true,
+      },
+    }),
+  ]);
+
+  const dinasList = groupedByDinas.length
+    ? await prisma.dinas.findMany({
+        where: { id: { in: groupedByDinas.map((entry) => entry.dinasId) } },
+        select: { id: true, code: true, type: true, name: true },
+      })
+    : [];
+  const dinasMap = new Map(dinasList.map((dinas) => [dinas.id, dinas]));
+
+  return {
+    byType: groupedByDinas.map((entry) => ({
+      dinasId: entry.dinasId,
+      type: dinasMap.get(entry.dinasId)?.type || dinasMap.get(entry.dinasId)?.code || null,
+      dinasName: dinasMap.get(entry.dinasId)?.name ?? null,
+      total: entry._count?._all ?? 0,
+    })),
+    byCityRegency: groupedByCityRegency.map((entry) => ({
+      cityRegency: entry.cityRegency,
+      total: entry._count?._all ?? 0,
+    })),
+  };
+}
+
+async function getAgencyLocationPayload(
+  where: Prisma.CabangDinasWhereInput,
+) {
+  const [offices, total, stats] = await Promise.all([
+    prisma.cabangDinas.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        wilayah: true,
+        address: true,
+        latitude: true,
+        longitude: true,
+        phone: true,
+        province: true,
+        cityRegency: true,
+        coverageRadiusKm: true,
+        isRoutingEnabled: true,
+        serviceTags: true,
+        dinas: {
+          select: {
+            id: true,
+            code: true,
+            type: true,
+            name: true,
+            short: true,
+          },
+        },
+      },
+      orderBy: { name: "asc" },
+    }),
+    prisma.cabangDinas.count({ where }),
+    getAgencyLocationStats(where),
+  ]);
+
+  const data = offices.map((office) => ({
     id: office.id,
-    dinasId: office.dinasId,
-    name: office.name,
+    dinasId: office.dinas.id,
+    dinasCode: office.dinas.code,
+    dinasName: office.dinas.name,
+    dinasShort: office.dinas.short,
     type: office.dinas.type || office.dinas.code,
+    name: office.name,
     lat: office.latitude,
     lng: office.longitude,
     wilayah: office.wilayah,
+    address: office.address,
+    phone: office.phone,
     cityRegency: office.cityRegency,
     province: office.province,
     coverageRadiusKm: office.coverageRadiusKm,
+    isRoutingEnabled: office.isRoutingEnabled,
     serviceTags: office.serviceTags,
   }));
+
+  return {
+    data,
+    total,
+    stats,
+  };
 }
 
 // GET /api/agencies
 router.get("/", async (req, res, next) => {
   try {
     const pagination = parsePagination(req.query, { defaultLimit: 20 });
-
-    if (req.query.view === "map" || req.query.format === "map") {
-      const [pins, total, groupedByType] = await Promise.all([
-        getAgencyMapPins({ skip: pagination.skip, take: pagination.take }),
-        prisma.cabangDinas.count({
-          where: {
-            isRoutingEnabled: true,
-            latitude: { not: null },
-            longitude: { not: null },
-            dinas: { isActive: true },
-          },
-        }),
-        prisma.cabangDinas.groupBy({
-          by: ["dinasId"],
-          where: {
-            isRoutingEnabled: true,
-            latitude: { not: null },
-            longitude: { not: null },
-            dinas: { isActive: true },
-          },
-          _count: {
-            _all: true,
-          },
-        }),
-      ]);
-
-      const dinasList = groupedByType.length
-        ? await prisma.dinas.findMany({
-            where: { id: { in: groupedByType.map((entry) => entry.dinasId) } },
-            select: { id: true, code: true, type: true, name: true },
-          })
-        : [];
-      const dinasMap = new Map(dinasList.map((dinas) => [dinas.id, dinas]));
-
-      return res.json(
-        buildListResponse(pins, pagination, total, {
-          byType: groupedByType.map((entry) => ({
-            dinasId: entry.dinasId,
-            type: dinasMap.get(entry.dinasId)?.type || dinasMap.get(entry.dinasId)?.code || null,
-            dinasName: dinasMap.get(entry.dinasId)?.name ?? null,
-            total: entry._count?._all ?? 0,
-          })),
-        }),
-      );
-    }
 
     const search = getStringQuery(req.query.search);
     const type = getStringQuery(req.query.type);
@@ -133,52 +218,37 @@ router.get("/", async (req, res, next) => {
   }
 });
 
+// GET /api/agencies/locations
+router.get("/locations", async (req, res, next) => {
+  try {
+    const where = buildAgencyLocationWhere({
+      search: getStringQuery(req.query.search),
+      type: getStringQuery(req.query.type),
+      dinasId: getStringQuery(req.query.dinasId),
+      cityRegency: getStringQuery(req.query.cityRegency),
+      wilayah: getStringQuery(req.query.wilayah),
+    });
+    const payload = await getAgencyLocationPayload(where);
+
+    res.json(buildDataResponse(payload.data, { total: payload.total, ...payload.stats }));
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /api/agencies/map-pins
 router.get("/map-pins", async (req, res, next) => {
   try {
-    const pagination = parsePagination(req.query, { defaultLimit: 50, maxLimit: 200 });
-    const [pins, total, groupedByType] = await Promise.all([
-      getAgencyMapPins({ skip: pagination.skip, take: pagination.take }),
-      prisma.cabangDinas.count({
-        where: {
-          isRoutingEnabled: true,
-          latitude: { not: null },
-          longitude: { not: null },
-          dinas: { isActive: true },
-        },
-      }),
-      prisma.cabangDinas.groupBy({
-        by: ["dinasId"],
-        where: {
-          isRoutingEnabled: true,
-          latitude: { not: null },
-          longitude: { not: null },
-          dinas: { isActive: true },
-        },
-        _count: {
-          _all: true,
-        },
-      }),
-    ]);
+    const where = buildAgencyLocationWhere({
+      search: getStringQuery(req.query.search),
+      type: getStringQuery(req.query.type),
+      dinasId: getStringQuery(req.query.dinasId),
+      cityRegency: getStringQuery(req.query.cityRegency),
+      wilayah: getStringQuery(req.query.wilayah),
+    });
+    const payload = await getAgencyLocationPayload(where);
 
-    const dinasList = groupedByType.length
-      ? await prisma.dinas.findMany({
-          where: { id: { in: groupedByType.map((entry) => entry.dinasId) } },
-          select: { id: true, code: true, type: true, name: true },
-        })
-      : [];
-    const dinasMap = new Map(dinasList.map((dinas) => [dinas.id, dinas]));
-
-    res.json(
-      buildListResponse(pins, pagination, total, {
-        byType: groupedByType.map((entry) => ({
-          dinasId: entry.dinasId,
-          type: dinasMap.get(entry.dinasId)?.type || dinasMap.get(entry.dinasId)?.code || null,
-          dinasName: dinasMap.get(entry.dinasId)?.name ?? null,
-          total: entry._count?._all ?? 0,
-        })),
-      }),
-    );
+    res.json(buildDataResponse(payload.data, { total: payload.total, ...payload.stats }));
   } catch (error) {
     next(error);
   }
@@ -297,7 +367,9 @@ router.get("/:id/reports", async (req, res, next) => {
       }),
     ]);
 
-    const categoryIds = groupedByCategory.map((entry) => entry.kategoriId);
+    const categoryIds = groupedByCategory
+      .map((entry) => entry.kategoriId)
+      .filter((value): value is string => typeof value === "string");
     const categories = categoryIds.length
       ? await prisma.kategoriLaporan.findMany({
           where: { id: { in: categoryIds } },
@@ -314,8 +386,8 @@ router.get("/:id/reports", async (req, res, next) => {
         })),
         byCategory: groupedByCategory.map((entry) => ({
           kategoriId: entry.kategoriId,
-          kategoriCode: categoryMap.get(entry.kategoriId)?.code ?? null,
-          kategoriName: categoryMap.get(entry.kategoriId)?.name ?? null,
+          kategoriCode: entry.kategoriId ? categoryMap.get(entry.kategoriId)?.code ?? null : null,
+          kategoriName: entry.kategoriId ? categoryMap.get(entry.kategoriId)?.name ?? null : null,
           total: entry._count?._all ?? 0,
         })),
       }),
