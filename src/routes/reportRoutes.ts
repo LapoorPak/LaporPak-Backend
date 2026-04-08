@@ -4,7 +4,6 @@ import { UPLOAD_PUBLIC_PATH } from "../config/storage.js";
 import { upload } from "../config/upload.js";
 import { requireAuth, requireAgencyRole, requireCitizenRole } from "../middleware/authMiddleware.js";
 import {
-  assignReport,
   createReport,
   getReportById,
   getReportDashboard,
@@ -215,20 +214,6 @@ router.post("/:id/resolve", requireAuth, requireAgencyRole, async (req, res, nex
       userId: req.user.id,
       resolutionNote: req.body.resolutionNote,
       agencyNote: getBodyString(req.body.agencyNote) ?? getBodyString(req.body.catatanDinas),
-    });
-
-    res.json(buildDataResponse(laporan));
-  } catch (error) {
-    next(error);
-  }
-});
-
-// POST /api/reports/:id/assign
-router.post("/:id/assign", requireAuth, requireAgencyRole, async (req, res, next) => {
-  try {
-    const laporan = await assignReport({
-      id: String(req.params.id),
-      assignedToId: getBodyString(req.body.assignedToId),
     });
 
     res.json(buildDataResponse(laporan));

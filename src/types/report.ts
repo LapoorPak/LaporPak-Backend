@@ -65,8 +65,3 @@ export interface ResolveReportInput {
   resolutionNote?: unknown;
   agencyNote?: unknown;
 }
-
-export interface AssignReportInput {
-  id: string;
-  assignedToId?: string;
-}

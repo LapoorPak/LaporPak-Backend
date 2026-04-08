@@ -12,7 +12,6 @@ import {
 import { analyzeReportSubmission, getDinasTypeForCategory } from "./reportAiWrapper.js";
 import { resolveCabangDinas } from "./routingService.js";
 import type {
-  AssignReportInput,
   CreateReportInput,
   DashboardTab,
   GetReportDashboardInput,
@@ -1283,25 +1282,6 @@ export async function resolveReport(input: ResolveReportInput) {
       officerStatusNotification("resolved", laporan.title, laporan.id, laporan.assignedTo?.name),
     ).catch((error) => console.error("[notification] cabang notify failed:", error));
   }
-
-  return {
-    ...laporan,
-    aiReview: buildPersistedAiReview(laporan),
-  };
-}
-
-export async function assignReport(input: AssignReportInput) {
-  if (!input.assignedToId) {
-    throw new AppError("assignedToId is required", 400);
-  }
-
-  await getReportOrThrow(input.id);
-
-  const laporan = await prisma.laporan.update({
-    where: { id: input.id },
-    data: { assignedToId: input.assignedToId },
-    include: reportDetailInclude,
-  });
 
   return {
     ...laporan,
