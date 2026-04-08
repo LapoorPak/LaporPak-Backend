@@ -1,24 +1,13 @@
 import type { NextFunction, Request, Response } from "express";
 import { fromNodeHeaders } from "better-auth/node";
 import { auth } from "../config/auth.js";
+import type { AuthenticatedSession, AuthenticatedUser } from "../types/auth.js";
 
 declare global {
   namespace Express {
     interface Request {
-      user: {
-        id: string;
-        name: string;
-        email: string;
-        role: string;
-        image: string | null;
-        phone: string | null;
-      };
-      session: {
-        id: string;
-        token: string;
-        userId: string;
-        expiresAt: Date;
-      };
+      user: AuthenticatedUser;
+      session: AuthenticatedSession;
     }
   }
 }
@@ -66,7 +55,20 @@ export function requireRole(...roles: string[]) {
   };
 }
 
-const AGENCY_ROLES = ["dinas_pu", "dinas_dlhk", "dinas_bpbd", "dinas_dishub", "dinas_pln", "admin"];
+function isAgencyRole(role: string | undefined) {
+  return typeof role === "string" && role.trim().length > 0 && role !== "warga";
+}
 
-export const requireAgencyRole = requireRole(...AGENCY_ROLES);
+export function requireAgencyRole(req: Request, _res: Response, next: NextFunction) {
+  if (!req.user) {
+    return next(new AppError("Unauthorized", 401));
+  }
+
+  if (!isAgencyRole(req.user.role)) {
+    return next(new AppError("Forbidden", 403));
+  }
+
+  next();
+}
+
 export const requireCitizenRole = requireRole("warga");

@@ -9,6 +9,7 @@ import { getHealthSnapshot } from "./config/health.js";
 import { UPLOAD_DIR, UPLOAD_PUBLIC_PATH } from "./config/storage.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { requestLogger } from "./middleware/requestLogger.js";
+import authRouter from "./routes/authRoutes.js";
 import reportRouter from "./routes/reportRoutes.js";
 import agencyRouter from "./routes/agencyRoutes.js";
 import categoryRouter from "./routes/categoryRoutes.js";
@@ -22,25 +23,28 @@ const port = Number(process.env.PORT || 3000);
 app.use(corsMiddleware);
 app.use(requestLogger);
 
-// 2. Better Auth handler BEFORE express.json() — Express v5 uses /*splat
+// 2. Custom auth routes that need access to Better Auth session cookies
+app.use("/api/auth", authRouter);
+
+// 3. Better Auth handler BEFORE express.json() — Express v5 uses /*splat
 app.all("/api/auth/*splat", toNodeHandler(auth));
 
-// 3. Other middleware AFTER Better Auth
+// 4. Other middleware AFTER Better Auth
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// 4. Static files for uploads
+// 5. Static files for uploads
 app.use(UPLOAD_PUBLIC_PATH, express.static(UPLOAD_DIR));
 
-// 5. API routes
+// 6. API routes
 app.use("/api/reports", reportRouter);
 app.use("/api/agencies", agencyRouter);
 app.use("/api/categories", categoryRouter);
 app.use("/api/upload", uploadRouter);
 app.use("/api/notifications", notificationRouter);
 
-// 6. Health check
+// 7. Health check
 app.get("/api/health/live", (_req, res) => {
   res.status(200).json({
     status: "ok",
@@ -57,7 +61,7 @@ app.get("/api/health", async (_req, res, next) => {
   }
 });
 
-// 7. Error handler (must be last)
+// 8. Error handler (must be last)
 app.use(errorHandler);
 
 // Start server
