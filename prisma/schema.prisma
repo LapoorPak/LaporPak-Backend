@@ -193,6 +193,7 @@ model Laporan {
   aiSuggestedSlaHours   Int?
   aiAssignedBranchReason String?
   aiRouteMeta           Json?
+  agencyNote            String?
   resolutionNote        String?
   resolvedAt            DateTime?
   createdAt             DateTime             @default(now())
