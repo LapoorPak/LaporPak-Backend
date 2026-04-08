@@ -541,38 +541,6 @@ router.get("/locations", async (req, res, next) => {
   }
 });
 
-// GET /api/reports/me/locations
-router.get("/me/locations", requireAuth, async (req, res, next) => {
-  try {
-    const pagination = parsePagination(req.query, { defaultLimit: 20, maxLimit: 100 });
-    const status = getStringQuery(req.query.status);
-    const search = getStringQuery(req.query.search);
-
-    if (status && !VALID_STATUSES.includes(status as (typeof VALID_STATUSES)[number])) {
-      throw new AppError(`Invalid status. Must be one of: ${VALID_STATUSES.join(", ")}`, 400);
-    }
-
-    const where = buildReportLocationWhere({
-      status,
-      kategoriId: getStringQuery(req.query.kategoriId),
-      dinasId: getStringQuery(req.query.dinasId),
-      cabangDinasId: getStringQuery(req.query.cabangDinasId),
-      createdById: req.user.id,
-      search,
-      minLat: getNumberQuery(req.query.minLat),
-      maxLat: getNumberQuery(req.query.maxLat),
-      minLng: getNumberQuery(req.query.minLng),
-      maxLng: getNumberQuery(req.query.maxLng),
-    });
-
-    const payload = await getReportLocationPayload(where, pagination);
-
-    res.json(buildListResponse(payload.data, pagination, payload.total, payload.stats));
-  } catch (error) {
-    next(error);
-  }
-});
-
 // POST /api/reports
 router.post("/", requireAuth, requireCitizenRole, upload.array("images", 5), async (req, res, next) => {
   try {
