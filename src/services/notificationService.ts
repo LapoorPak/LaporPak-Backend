@@ -1,17 +1,6 @@
 import { prisma } from "../config/db.js";
 import { NotificationType } from "../generated/prisma/client.js";
-
-interface NotificationData {
-  type: NotificationType;
-  title: string;
-  message: string;
-  tag: string;
-  laporanId?: string;
-}
-
-interface CreateNotificationInput extends NotificationData {
-  userId: string;
-}
+import type { CreateNotificationInput, NotificationData } from "../types/notification.js";
 
 export async function notifyDinasOfficers(dinasId: string, data: NotificationData) {
   const officers = await prisma.petugasDinas.findMany({
