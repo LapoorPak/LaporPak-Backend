@@ -3,7 +3,7 @@ import { APIError, betterAuth } from "better-auth";
 import { createAuthMiddleware, getOAuthState } from "better-auth/api";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { deleteSessionCookie } from "better-auth/cookies";
-import { admin } from "better-auth/plugins";
+import { admin, emailOTP } from "better-auth/plugins";
 import { prisma } from "./db.js";
 import {
   ADMIN_PORTAL,
@@ -12,11 +12,15 @@ import {
   getPortalForRole,
   type AuthPortal,
 } from "../utils/authPortal.js";
+import { sendAuthOtpEmail } from "../services/authOtpEmailService.js";
 
 const betterAuthUrl = process.env.BETTER_AUTH_URL || "http://localhost:3000";
 const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
 const isSecureDeployment = betterAuthUrl.startsWith("https://");
 const PORTAL_ERROR_COOKIE = "lp_portal_error";
+const authOtpExpiresInSeconds = 60 * 5;
+const authOtpLength = 6;
+const authOtpAllowedAttempts = 3;
 
 function getPortalFromUrl(url: unknown) {
   if (typeof url !== "string" || !url.trim()) {
@@ -200,8 +204,15 @@ export const auth = betterAuth({
       sameSite: isSecureDeployment ? "none" : "lax",
     },
   },
+  emailVerification: {
+    sendOnSignUp: true,
+    sendOnSignIn: true,
+    autoSignInAfterVerification: true,
+  },
   emailAndPassword: {
     enabled: true,
+    autoSignIn: false,
+    requireEmailVerification: true,
   },
   socialProviders: {
     google: {
@@ -237,6 +248,10 @@ export const auth = betterAuth({
         callbackUrl = String(ctx.body?.callbackURL || "");
         if (!targetPortal) {
           targetPortal = getPortalFromUrl(callbackUrl) || CITIZEN_PORTAL;
+        }
+      } else if (ctx.path === "/sign-in/email-otp") {
+        if (!targetPortal) {
+          targetPortal = CITIZEN_PORTAL;
         }
       } else if (ctx.path?.startsWith("/callback/")) {
         const oauthState = await getOAuthState();
@@ -334,6 +349,17 @@ export const auth = betterAuth({
     },
   },
   plugins: [
+    emailOTP({
+      overrideDefaultEmailVerification: true,
+      disableSignUp: true,
+      otpLength: authOtpLength,
+      expiresIn: authOtpExpiresInSeconds,
+      allowedAttempts: authOtpAllowedAttempts,
+      storeOTP: "hashed",
+      async sendVerificationOTP({ email, otp, type }) {
+        await sendAuthOtpEmail({ email, otp, type });
+      },
+    }),
     admin({
       defaultRole: "warga",
     }),

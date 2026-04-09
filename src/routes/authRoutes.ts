@@ -6,6 +6,13 @@ import { buildDataResponse } from "../utils/apiResponse.js";
 
 const router = Router();
 
+router.post("/sign-in/email-otp", (_req, res) => {
+  res.status(403).json({
+    error:
+      "Passwordless OTP sign-in tidak diaktifkan. Gunakan login email/password lalu verifikasi email dengan kode OTP.",
+  });
+});
+
 // GET /api/auth/session-detail
 router.get("/session-detail", requireAuth, async (req, res, next) => {
   try {
