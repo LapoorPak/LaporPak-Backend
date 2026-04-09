@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 import { fromNodeHeaders } from "better-auth/node";
 import { auth } from "../config/auth.js";
 import type { AuthenticatedSession, AuthenticatedUser } from "../types/auth.js";
+import { isAdminRole, isStaffRole } from "../utils/authPortal.js";
 
 declare global {
   namespace Express {
@@ -56,7 +57,7 @@ export function requireRole(...roles: string[]) {
 }
 
 function isAgencyRole(role: string | undefined) {
-  return typeof role === "string" && role.trim().length > 0 && role !== "warga";
+  return isStaffRole(role);
 }
 
 export function requireAgencyRole(req: Request, _res: Response, next: NextFunction) {
@@ -65,6 +66,18 @@ export function requireAgencyRole(req: Request, _res: Response, next: NextFuncti
   }
 
   if (!isAgencyRole(req.user.role)) {
+    return next(new AppError("Forbidden", 403));
+  }
+
+  next();
+}
+
+export function requireAdminRole(req: Request, _res: Response, next: NextFunction) {
+  if (!req.user) {
+    return next(new AppError("Unauthorized", 401));
+  }
+
+  if (!isAdminRole(req.user.role)) {
     return next(new AppError("Forbidden", 403));
   }
 

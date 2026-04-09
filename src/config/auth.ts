@@ -5,33 +5,18 @@ import { prismaAdapter } from "better-auth/adapters/prisma";
 import { deleteSessionCookie } from "better-auth/cookies";
 import { admin } from "better-auth/plugins";
 import { prisma } from "./db.js";
+import {
+  ADMIN_PORTAL,
+  AGENCY_PORTAL,
+  CITIZEN_PORTAL,
+  getPortalForRole,
+  type AuthPortal,
+} from "../utils/authPortal.js";
 
 const betterAuthUrl = process.env.BETTER_AUTH_URL || "http://localhost:3000";
 const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
 const isSecureDeployment = betterAuthUrl.startsWith("https://");
-const agencyRoleErrorMessage =
-  "Terjadi kesalahan saat login. Pastikan portal sesuai.";
-const citizenRoleErrorMessage =
-  "Terjadi kesalahan saat login. Pastikan portal sesuai.";
-const AGENCY_PORTAL = "agency";
-const CITIZEN_PORTAL = "citizen";
 const PORTAL_ERROR_COOKIE = "lp_portal_error";
-
-function isAgencyCallbackUrl(url: unknown) {
-  if (typeof url !== "string" || !url.trim()) {
-    return false;
-  }
-
-  try {
-    const parsedUrl = new URL(url, clientUrl);
-    return (
-      parsedUrl.pathname === "/agency" ||
-      parsedUrl.pathname.startsWith("/agency/")
-    );
-  } catch {
-    return false;
-  }
-}
 
 function getPortalFromUrl(url: unknown) {
   if (typeof url !== "string" || !url.trim()) {
@@ -44,6 +29,10 @@ function getPortalFromUrl(url: unknown) {
 
     if (pathname === "/agency" || pathname.startsWith("/agency/")) {
       return AGENCY_PORTAL;
+    }
+
+    if (pathname === "/admin" || pathname.startsWith("/admin/")) {
+      return ADMIN_PORTAL;
     }
 
     if (
@@ -65,8 +54,12 @@ function getPortalFromUrl(url: unknown) {
 
 function isPortal(
   value: unknown,
-): value is typeof AGENCY_PORTAL | typeof CITIZEN_PORTAL {
-  return value === AGENCY_PORTAL || value === CITIZEN_PORTAL;
+): value is AuthPortal {
+  return (
+    value === AGENCY_PORTAL ||
+    value === CITIZEN_PORTAL ||
+    value === ADMIN_PORTAL
+  );
 }
 
 function getRequestPortal(ctx: {
@@ -94,6 +87,11 @@ function getRequestPortal(ctx: {
     return errorCallbackPortal;
   }
 
+  const newUserCallbackPortal = getPortalFromUrl(ctx.body?.newUserCallbackURL);
+  if (newUserCallbackPortal) {
+    return newUserCallbackPortal;
+  }
+
   const refererPortal = getPortalFromUrl(ctx.headers?.get("referer"));
   if (refererPortal) {
     return refererPortal;
@@ -102,23 +100,65 @@ function getRequestPortal(ctx: {
   return null;
 }
 
-function buildAuthErrorRedirect(targetUrl: string) {
+function buildPortalErrorRedirect(
+  targetUrl: string,
+  code: string,
+  message: string,
+) {
   const redirectUrl = new URL(targetUrl, clientUrl);
-  redirectUrl.searchParams.set("portal_error", "agency_role_forbidden");
-  redirectUrl.searchParams.set("portal_message", agencyRoleErrorMessage);
-  return redirectUrl.toString();
-}
-
-function buildCitizenAuthErrorRedirect(targetUrl: string) {
-  const redirectUrl = new URL(targetUrl, clientUrl);
-  redirectUrl.searchParams.set("portal_error", "citizen_role_forbidden");
-  redirectUrl.searchParams.set("portal_message", citizenRoleErrorMessage);
+  redirectUrl.searchParams.set("portal_error", code);
+  redirectUrl.searchParams.set("portal_message", message);
   return redirectUrl.toString();
 }
 
 function buildPortalErrorCookie(code: string, message: string) {
   const value = encodeURIComponent(JSON.stringify({ code, message }));
   return `${PORTAL_ERROR_COOKIE}=${value}; Max-Age=60; Path=/; SameSite=Lax`;
+}
+
+function getPortalMismatchResponse(
+  userPortal: AuthPortal,
+  targetPortal: AuthPortal,
+) {
+  if (targetPortal === CITIZEN_PORTAL) {
+    if (userPortal === ADMIN_PORTAL) {
+      return {
+        code: "citizen_portal_forbidden",
+        message: "Akun Anda terdaftar sebagai admin. Silakan login melalui portal admin.",
+      };
+    }
+
+    return {
+      code: "citizen_portal_forbidden",
+      message: "Akun Anda terdaftar sebagai petugas. Silakan login melalui portal dinas.",
+    };
+  }
+
+  if (targetPortal === AGENCY_PORTAL) {
+    if (userPortal === ADMIN_PORTAL) {
+      return {
+        code: "agency_portal_forbidden",
+        message: "Akun Anda terdaftar sebagai admin. Silakan login melalui portal admin.",
+      };
+    }
+
+    return {
+      code: "agency_portal_forbidden",
+      message: "Akun Anda adalah akun warga. Silakan login melalui portal warga.",
+    };
+  }
+
+  if (userPortal === CITIZEN_PORTAL) {
+    return {
+      code: "admin_portal_forbidden",
+      message: "Akun Anda adalah akun warga. Portal admin hanya untuk administrator.",
+    };
+  }
+
+  return {
+    code: "admin_portal_forbidden",
+    message: "Akun Anda terdaftar sebagai petugas. Silakan login melalui portal dinas.",
+  };
 }
 
 function logPortalDecision(details: Record<string, unknown>) {
@@ -167,6 +207,7 @@ export const auth = betterAuth({
     google: {
       clientId: process.env.GOOGLE_CLIENT_ID || "",
       clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
+      disableImplicitSignUp: true,
     },
   },
   session: {
@@ -184,11 +225,10 @@ export const auth = betterAuth({
         return;
       }
 
-      const isWarga = newSession.user.role === "warga";
+      const userPortal = getPortalForRole(newSession.user.role);
       const requestPortal = getRequestPortal(ctx);
 
-      let targetPortal: typeof AGENCY_PORTAL | typeof CITIZEN_PORTAL | null =
-        requestPortal;
+      let targetPortal: AuthPortal | null = requestPortal;
       let redirectTarget: string | null = null;
       let callbackUrl: string | null = null;
       let parsedStatePortal: string | null = null;
@@ -196,9 +236,7 @@ export const auth = betterAuth({
       if (ctx.path === "/sign-in/email") {
         callbackUrl = String(ctx.body?.callbackURL || "");
         if (!targetPortal) {
-          targetPortal = isAgencyCallbackUrl(callbackUrl)
-            ? AGENCY_PORTAL
-            : CITIZEN_PORTAL;
+          targetPortal = getPortalFromUrl(callbackUrl) || CITIZEN_PORTAL;
         }
       } else if (ctx.path?.startsWith("/callback/")) {
         const oauthState = await getOAuthState();
@@ -208,9 +246,7 @@ export const auth = betterAuth({
             : null;
           targetPortal = isPortal(oauthState.portal)
             ? oauthState.portal
-            : isAgencyCallbackUrl(oauthState.callbackURL)
-              ? AGENCY_PORTAL
-              : CITIZEN_PORTAL;
+            : getPortalFromUrl(oauthState.callbackURL) || CITIZEN_PORTAL;
           redirectTarget = oauthState.errorURL || oauthState.callbackURL;
         }
       }
@@ -219,6 +255,7 @@ export const auth = betterAuth({
         path: ctx.path,
         userEmail: newSession.user.email,
         userRole: newSession.user.role,
+        userPortal,
         requestPortal,
         targetPortal,
         callbackUrl,
@@ -238,80 +275,48 @@ export const auth = betterAuth({
         return;
       }
 
-      if (!isWarga) {
-        if (targetPortal === CITIZEN_PORTAL) {
-          logPortalDecision({
-            decision: "deny",
-            reason: "agency_user_on_citizen_portal",
-            userEmail: newSession.user.email,
-            userRole: newSession.user.role,
-            targetPortal,
-            path: ctx.path,
-          });
-          await revokeNewSession(ctx);
-          if (ctx.path === "/sign-in/email") {
-            throw new APIError("FORBIDDEN", {
-              message: citizenRoleErrorMessage,
-            });
-          } else if (redirectTarget) {
-            return {
-              headers: new Headers({
-                Location: buildCitizenAuthErrorRedirect(redirectTarget),
-                "Set-Cookie": buildPortalErrorCookie(
-                  "citizen_role_forbidden",
-                  citizenRoleErrorMessage,
-                ),
-              }),
-            };
-          }
-        }
+      if (userPortal === targetPortal) {
         logPortalDecision({
           decision: "allow",
-          reason: "agency_user_on_agency_portal",
+          reason: `${userPortal}_user_on_${targetPortal}_portal`,
           userEmail: newSession.user.email,
           userRole: newSession.user.role,
+          userPortal,
           targetPortal,
           path: ctx.path,
         });
         return;
       }
 
-      if (isWarga) {
-        if (targetPortal === AGENCY_PORTAL) {
-          logPortalDecision({
-            decision: "deny",
-            reason: "warga_user_on_agency_portal",
-            userEmail: newSession.user.email,
-            userRole: newSession.user.role,
-            targetPortal,
-            path: ctx.path,
-          });
-          await revokeNewSession(ctx);
-          if (ctx.path === "/sign-in/email") {
-            throw new APIError("FORBIDDEN", {
-              message: agencyRoleErrorMessage,
-            });
-          } else if (redirectTarget) {
-            return {
-              headers: new Headers({
-                Location: buildAuthErrorRedirect(redirectTarget),
-                "Set-Cookie": buildPortalErrorCookie(
-                  "agency_role_forbidden",
-                  agencyRoleErrorMessage,
-                ),
-              }),
-            };
-          }
-        }
-        logPortalDecision({
-          decision: "allow",
-          reason: "warga_user_on_citizen_portal",
-          userEmail: newSession.user.email,
-          userRole: newSession.user.role,
-          targetPortal,
-          path: ctx.path,
+      const mismatch = getPortalMismatchResponse(userPortal, targetPortal);
+      logPortalDecision({
+        decision: "deny",
+        reason: `${userPortal}_user_on_${targetPortal}_portal`,
+        userEmail: newSession.user.email,
+        userRole: newSession.user.role,
+        userPortal,
+        targetPortal,
+        path: ctx.path,
+      });
+      await revokeNewSession(ctx);
+      if (ctx.path === "/sign-in/email") {
+        throw new APIError("FORBIDDEN", {
+          message: mismatch.message,
         });
-        return;
+      } else if (redirectTarget) {
+        return {
+          headers: new Headers({
+            Location: buildPortalErrorRedirect(
+              redirectTarget,
+              mismatch.code,
+              mismatch.message,
+            ),
+            "Set-Cookie": buildPortalErrorCookie(
+              mismatch.code,
+              mismatch.message,
+            ),
+          }),
+        };
       }
     }),
   },
