@@ -6,7 +6,12 @@ import { toNodeHandler } from "better-auth/node";
 import { auth } from "./config/auth.js";
 import { corsMiddleware } from "./config/cors.js";
 import { getHealthSnapshot } from "./config/health.js";
-import { UPLOAD_DIR, UPLOAD_PUBLIC_PATH } from "./config/storage.js";
+import {
+  OFFICE_PHOTO_DIR,
+  OFFICE_PHOTO_PUBLIC_PATH,
+  UPLOAD_DIR,
+  UPLOAD_PUBLIC_PATH,
+} from "./config/storage.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { requestLogger } from "./middleware/requestLogger.js";
 import authRouter from "./routes/authRoutes.js";
@@ -36,6 +41,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // 5. Static files for uploads
 app.use(UPLOAD_PUBLIC_PATH, express.static(UPLOAD_DIR));
+app.use(OFFICE_PHOTO_PUBLIC_PATH, express.static(OFFICE_PHOTO_DIR));
 
 // 6. API routes
 app.use("/api/reports", reportRouter);

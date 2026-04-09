@@ -169,6 +169,8 @@ export async function listAgencyLocations(filters: AgencyLocationFilters) {
         coverageRadiusKm: true,
         isRoutingEnabled: true,
         serviceTags: true,
+        photos: true,
+        metadata: true,
         dinas: {
           select: {
             id: true,
@@ -204,6 +206,8 @@ export async function listAgencyLocations(filters: AgencyLocationFilters) {
       coverageRadiusKm: office.coverageRadiusKm,
       isRoutingEnabled: office.isRoutingEnabled,
       serviceTags: office.serviceTags,
+      photos: office.photos,
+      photoUrl: office.photos[0] ?? null,
     })),
     total,
     stats,

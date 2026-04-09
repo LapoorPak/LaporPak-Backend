@@ -1,4 +1,6 @@
 import "dotenv/config";
+import fs from "fs";
+import path from "path";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client.js";
 import { REPORT_CATEGORIES } from "../src/data/reportCategories.js";
@@ -8,6 +10,9 @@ const adapter = new PrismaPg({
 });
 
 const prisma = new PrismaClient({ adapter });
+const OFFICE_PHOTO_DIR = path.resolve("fotodinas");
+const OFFICE_PHOTO_PUBLIC_PATH = "/fotodinas";
+const OFFICE_PHOTO_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 
 interface DinasSeedDefinition {
   code: string;
@@ -53,6 +58,48 @@ const DINAS_DEFINITIONS: DinasSeedDefinition[] = [
     name: "Dinas Cipta Karya",
     short: "Cipta Karya",
     description: "Menangani bangunan publik dan infrastruktur perkotaan.",
+  },
+  {
+    code: "pupr",
+    name: "Dinas Pekerjaan Umum dan Penataan Ruang",
+    short: "PUPR",
+    description: "Menangani infrastruktur umum dan penataan ruang lintas sektor teknis.",
+  },
+  {
+    code: "perumahan",
+    name: "Dinas Perumahan Rakyat dan Kawasan Permukiman",
+    short: "Perumahan",
+    description: "Menangani kawasan permukiman, hunian, dan sarana prasarana perumahan.",
+  },
+  {
+    code: "satpol_pp",
+    name: "Satuan Polisi Pamong Praja",
+    short: "Satpol PP",
+    description: "Menangani ketertiban umum, penegakan perda, dan pelanggaran ruang publik.",
+  },
+  {
+    code: "bpbd",
+    name: "Badan Penanggulangan Bencana Daerah",
+    short: "BPBD",
+    description: "Menangani tanggap darurat bencana, banjir, longsor, dan koordinasi kebencanaan.",
+  },
+  {
+    code: "pemadam_kebakaran",
+    name: "Dinas Penanggulangan Kebakaran dan Penyelamatan",
+    short: "Damkar",
+    description: "Menangani kebakaran, penyelamatan, dan respons kondisi darurat kebencanaan.",
+  },
+  {
+    code: "ptsp",
+    name: "Dinas Penanaman Modal dan Pelayanan Terpadu Satu Pintu",
+    short: "PTSP",
+    description: "Menangani layanan perizinan, administrasi, dan pelayanan terpadu masyarakat.",
+  },
+  {
+    code: "kesehatan",
+    name: "Dinas Kesehatan",
+    short: "Kesehatan",
+    description: "Menangani fasilitas kesehatan publik, sanitasi dasar, dan layanan kesehatan masyarakat.",
   },
 ];
 
@@ -162,6 +209,22 @@ function inferServiceTags(office: CabangSeedDefinition) {
   return Array.from(tags);
 }
 
+function getOfficePhotoUrls(type: string) {
+  const folderPath = path.join(OFFICE_PHOTO_DIR, type);
+
+  if (!fs.existsSync(folderPath)) {
+    return [];
+  }
+
+  return fs
+    .readdirSync(folderPath, { withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => entry.name)
+    .filter((fileName) => OFFICE_PHOTO_EXTENSIONS.has(path.extname(fileName).toLowerCase()))
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+    .map((fileName) => `${OFFICE_PHOTO_PUBLIC_PATH}/${type}/${fileName}`);
+}
+
 async function seedDinas() {
   const dinasIdByCode = new Map<string, string>();
 
@@ -237,6 +300,7 @@ async function seedCabang(dinasIdByCode: Map<string, string>) {
     const province = inferProvince(office.name);
     const coverageRadiusKm = inferCoverageRadiusKm(office.name);
     const serviceTags = inferServiceTags(office);
+    const photoUrls = getOfficePhotoUrls(office.type);
 
     const existing = await prisma.cabangDinas.findFirst({
       where: {
@@ -255,6 +319,7 @@ async function seedCabang(dinasIdByCode: Map<string, string>) {
       coverageRadiusKm,
       isRoutingEnabled: true,
       serviceTags,
+      photos: photoUrls,
       metadata: {
         seedSource: "laporpak_ai_smart_routing_prd",
       },

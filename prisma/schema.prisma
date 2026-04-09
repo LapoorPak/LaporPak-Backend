@@ -132,6 +132,7 @@ model CabangDinas {
   coverageRadiusKm Int?
   isRoutingEnabled Boolean                  @default(true)
   serviceTags      String[]                 @default([])
+  photos           String[]                 @default([])
   metadata         Json?
 
   dinasId String

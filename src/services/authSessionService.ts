@@ -36,6 +36,7 @@ export async function getSessionDetail(input: GetSessionDetailInput) {
               coverageRadiusKm: true,
               isRoutingEnabled: true,
               serviceTags: true,
+              photos: true,
               metadata: true,
               dinas: {
                 select: {
