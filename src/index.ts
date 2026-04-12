@@ -20,6 +20,7 @@ import agencyRouter from "./routes/agencyRoutes.js";
 import categoryRouter from "./routes/categoryRoutes.js";
 import uploadRouter from "./routes/uploadRoutes.js";
 import notificationRouter from "./routes/notificationRoutes.js";
+import adminRouter from "./routes/adminRoutes.js";
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -47,6 +48,7 @@ app.use(OFFICE_PHOTO_PUBLIC_PATH, express.static(OFFICE_PHOTO_DIR));
 app.use("/api/reports", reportRouter);
 app.use("/api/agencies", agencyRouter);
 app.use("/api/categories", categoryRouter);
+app.use("/api/admin", adminRouter);
 app.use("/api/upload", uploadRouter);
 app.use("/api/notifications", notificationRouter);
 
