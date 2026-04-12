@@ -1,7 +1,9 @@
 import "dotenv/config";
+import { randomUUID } from "node:crypto";
 import fs from "fs";
 import path from "path";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { hashPassword } from "better-auth/crypto";
 import { PrismaClient } from "../src/generated/prisma/client.js";
 import { REPORT_CATEGORIES } from "../src/data/reportCategories.js";
 
@@ -13,6 +15,16 @@ const prisma = new PrismaClient({ adapter });
 const OFFICE_PHOTO_DIR = path.resolve("fotodinas");
 const OFFICE_PHOTO_PUBLIC_PATH = "/fotodinas";
 const OFFICE_PHOTO_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+const DEFAULT_DINAS_ACCOUNT_PASSWORD = process.env.SEED_DINAS_PASSWORD || "LaporPak123!";
+const DEFAULT_DINAS_EMAIL_DOMAIN = process.env.SEED_DINAS_EMAIL_DOMAIN || "laporpak.test";
+const DEFAULT_ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL || "admin@laporpak.test";
+const DEFAULT_ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || "AdminLaporPak123!";
+const DEFAULT_ADMIN_NAME = process.env.SEED_ADMIN_NAME || "Admin LaporPak";
+const DEFAULT_USER_PASSWORD = process.env.SEED_USER_PASSWORD || "UserLaporPak123!";
+const DEFAULT_DKI_JAKARTA_COORDINATES = {
+  lat: -6.1753924,
+  lng: 106.8271528,
+};
 
 interface DinasSeedDefinition {
   code: string;
@@ -26,6 +38,17 @@ interface CabangSeedDefinition {
   type: string;
   lat: number;
   lng: number;
+}
+
+interface SeededDinasAccount {
+  code: string;
+  email: string;
+  cabangName: string;
+}
+
+interface SeededUserAccount {
+  email: string;
+  name: string;
 }
 
 const DINAS_DEFINITIONS: DinasSeedDefinition[] = [
@@ -225,6 +248,27 @@ function getOfficePhotoUrls(type: string) {
     .map((fileName) => `${OFFICE_PHOTO_PUBLIC_PATH}/${type}/${fileName}`);
 }
 
+function buildDinasSeedEmail(code: string) {
+  return `dinas.${code.replace(/_/g, "-")}@${DEFAULT_DINAS_EMAIL_DOMAIN}`;
+}
+
+function buildUserSeedEmail(index: number) {
+  return `warga.${String(index + 1).padStart(3, "0")}@${DEFAULT_DINAS_EMAIL_DOMAIN}`;
+}
+
+function buildDinasSeedNip(index: number) {
+  return `SEED-DINAS-${String(index + 1).padStart(3, "0")}`;
+}
+
+function buildDefaultCabangSeed(dinas: DinasSeedDefinition): CabangSeedDefinition {
+  return {
+    name: `${dinas.name} Provinsi DKI Jakarta`,
+    type: dinas.code,
+    lat: DEFAULT_DKI_JAKARTA_COORDINATES.lat,
+    lng: DEFAULT_DKI_JAKARTA_COORDINATES.lng,
+  };
+}
+
 async function seedDinas() {
   const dinasIdByCode = new Map<string, string>();
 
@@ -336,15 +380,323 @@ async function seedCabang(dinasIdByCode: Map<string, string>) {
 
     await prisma.cabangDinas.create({ data });
   }
+
+  for (const dinas of DINAS_DEFINITIONS) {
+    const dinasId = dinasIdByCode.get(dinas.code);
+    if (!dinasId) {
+      throw new Error(`Missing dinas seed for default office ${dinas.name}`);
+    }
+
+    const cabangCount = await prisma.cabangDinas.count({
+      where: { dinasId },
+    });
+
+    if (cabangCount > 0) {
+      continue;
+    }
+
+    const defaultOffice = buildDefaultCabangSeed(dinas);
+    const photoUrls = getOfficePhotoUrls(defaultOffice.type);
+
+    await prisma.cabangDinas.create({
+      data: {
+        name: defaultOffice.name,
+        wilayah: inferWilayah(defaultOffice.name),
+        latitude: defaultOffice.lat,
+        longitude: defaultOffice.lng,
+        province: inferProvince(defaultOffice.name),
+        cityRegency: inferCityRegency(defaultOffice.name),
+        coverageRadiusKm: inferCoverageRadiusKm(defaultOffice.name),
+        isRoutingEnabled: true,
+        serviceTags: inferServiceTags(defaultOffice),
+        photos: photoUrls,
+        metadata: {
+          seedSource: "laporpak_ai_smart_routing_prd",
+          generatedDefaultBranch: true,
+        },
+        dinasId,
+      },
+    });
+  }
+}
+
+async function findPrimaryCabangDinasId(dinasId: string) {
+  const provinceOffice = await prisma.cabangDinas.findFirst({
+    where: {
+      dinasId,
+      name: {
+        contains: "Provinsi DKI Jakarta",
+        mode: "insensitive",
+      },
+    },
+    select: {
+      id: true,
+      name: true,
+    },
+    orderBy: {
+      name: "asc",
+    },
+  });
+
+  if (provinceOffice) {
+    return provinceOffice;
+  }
+
+  const fallbackOffice = await prisma.cabangDinas.findFirst({
+    where: { dinasId },
+    select: {
+      id: true,
+      name: true,
+    },
+    orderBy: {
+      name: "asc",
+    },
+  });
+
+  if (!fallbackOffice) {
+    throw new Error(`Missing cabang dinas for dinasId ${dinasId}`);
+  }
+
+  return fallbackOffice;
+}
+
+async function seedAkunDinas(dinasIdByCode: Map<string, string>) {
+  const seededAccounts: SeededDinasAccount[] = [];
+
+  for (const [index, dinas] of DINAS_DEFINITIONS.entries()) {
+    const dinasId = dinasIdByCode.get(dinas.code);
+    if (!dinasId) {
+      throw new Error(`Missing dinas seed for account ${dinas.name}`);
+    }
+
+    const cabang = await findPrimaryCabangDinasId(dinasId);
+    const email = buildDinasSeedEmail(dinas.code);
+    const passwordHash = await hashPassword(DEFAULT_DINAS_ACCOUNT_PASSWORD);
+
+    const user = await prisma.user.upsert({
+      where: { email },
+      update: {
+        name: `Petugas ${dinas.short}`,
+        role: dinas.code,
+        emailVerified: true,
+        banned: false,
+        banReason: null,
+        banExpires: null,
+      },
+      create: {
+        id: randomUUID(),
+        name: `Petugas ${dinas.short}`,
+        email,
+        role: dinas.code,
+        emailVerified: true,
+      },
+    });
+
+    const credentialAccount = await prisma.account.findFirst({
+      where: {
+        userId: user.id,
+        providerId: "credential",
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (credentialAccount) {
+      await prisma.account.update({
+        where: { id: credentialAccount.id },
+        data: {
+          accountId: user.id,
+          password: passwordHash,
+        },
+      });
+    } else {
+      await prisma.account.create({
+        data: {
+          id: randomUUID(),
+          accountId: user.id,
+          providerId: "credential",
+          userId: user.id,
+          password: passwordHash,
+        },
+      });
+    }
+
+    await prisma.petugasDinas.upsert({
+      where: { userId: user.id },
+      update: {
+        nip: buildDinasSeedNip(index),
+        cabangDinasId: cabang.id,
+      },
+      create: {
+        nip: buildDinasSeedNip(index),
+        userId: user.id,
+        cabangDinasId: cabang.id,
+      },
+    });
+
+    seededAccounts.push({
+      code: dinas.code,
+      email,
+      cabangName: cabang.name,
+    });
+  }
+
+  return seededAccounts;
+}
+
+async function seedWargaUsers(count = 5) {
+  const seededUsers: SeededUserAccount[] = [];
+  const passwordHash = await hashPassword(DEFAULT_USER_PASSWORD);
+
+  for (let i = 0; i < count; i += 1) {
+    const email = buildUserSeedEmail(i);
+    const name = `Warga ${String(i + 1).padStart(2, "0")}`;
+
+    const user = await prisma.user.upsert({
+      where: { email },
+      update: {
+        name,
+        role: "warga",
+        emailVerified: true,
+        banned: false,
+        banReason: null,
+        banExpires: null,
+      },
+      create: {
+        id: randomUUID(),
+        name,
+        email,
+        role: "warga",
+        emailVerified: true,
+      },
+    });
+
+    const credentialAccount = await prisma.account.findFirst({
+      where: {
+        userId: user.id,
+        providerId: "credential",
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (credentialAccount) {
+      await prisma.account.update({
+        where: { id: credentialAccount.id },
+        data: {
+          accountId: user.id,
+          password: passwordHash,
+        },
+      });
+    } else {
+      await prisma.account.create({
+        data: {
+          id: randomUUID(),
+          accountId: user.id,
+          providerId: "credential",
+          userId: user.id,
+          password: passwordHash,
+        },
+      });
+    }
+
+    seededUsers.push({ email, name });
+  }
+
+  return seededUsers;
+}
+
+async function seedAdminAccount() {
+  const passwordHash = await hashPassword(DEFAULT_ADMIN_PASSWORD);
+
+  const user = await prisma.user.upsert({
+    where: { email: DEFAULT_ADMIN_EMAIL },
+    update: {
+      name: DEFAULT_ADMIN_NAME,
+      role: "admin",
+      emailVerified: true,
+      banned: false,
+      banReason: null,
+      banExpires: null,
+    },
+    create: {
+      id: randomUUID(),
+      name: DEFAULT_ADMIN_NAME,
+      email: DEFAULT_ADMIN_EMAIL,
+      role: "admin",
+      emailVerified: true,
+    },
+  });
+
+  const credentialAccount = await prisma.account.findFirst({
+    where: {
+      userId: user.id,
+      providerId: "credential",
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (credentialAccount) {
+    await prisma.account.update({
+      where: { id: credentialAccount.id },
+      data: {
+        accountId: user.id,
+        password: passwordHash,
+      },
+    });
+  } else {
+    await prisma.account.create({
+      data: {
+        id: randomUUID(),
+        accountId: user.id,
+        providerId: "credential",
+        userId: user.id,
+        password: passwordHash,
+      },
+    });
+  }
+
+  return {
+    email: DEFAULT_ADMIN_EMAIL,
+  };
 }
 
 async function main() {
   const dinasIdByCode = await seedDinas();
   await seedKategori(dinasIdByCode);
   await seedCabang(dinasIdByCode);
+  const seededAccounts = await seedAkunDinas(dinasIdByCode);
+  const seededUsers = await seedWargaUsers(5);
+  const seededAdmin = await seedAdminAccount();
 
   console.log(
-    `Seed selesai: ${DINAS_DEFINITIONS.length} dinas keluarga, ${REPORT_CATEGORIES.length} kategori, ${CABANG_SEED_DATA.length} kantor/cabang.`,
+    `Seed selesai: ${DINAS_DEFINITIONS.length} dinas, ${REPORT_CATEGORIES.length} kategori, ${await prisma.cabangDinas.count()} kantor/cabang, ${seededAccounts.length} akun dinas.`,
+  );
+  console.log(
+    `Login akun dinas: email format ${buildDinasSeedEmail("<kode_dinas>")} dengan password ${DEFAULT_DINAS_ACCOUNT_PASSWORD}.`,
+  );
+  console.log(
+    `Login admin: ${seededAdmin.email} dengan password ${DEFAULT_ADMIN_PASSWORD}.`,
+  );
+  console.log(
+    `Login warga: email format ${buildUserSeedEmail(0).replace("001", "<nnn>")} dengan password ${DEFAULT_USER_PASSWORD}.`,
+  );
+  console.log("Daftar akun admin:", { email: seededAdmin.email, role: "admin" });
+  console.log(
+    "Daftar akun dinas:",
+    seededAccounts.map((account) => ({
+      email: account.email,
+      role: account.code,
+      cabang: account.cabangName,
+    })),
+  );
+  console.log(
+    "Daftar akun warga:",
+    seededUsers.map((user) => ({ email: user.email, role: "warga", name: user.name })),
   );
 }
 
