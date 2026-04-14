@@ -2,6 +2,9 @@ import { Router } from "express";
 
 import { requireAdminRole, requireAuth } from "../middleware/authMiddleware.js";
 import {
+  adminAssignLaporan,
+  adminDeleteLaporan,
+  adminUpdateLaporanStatus,
   assignPetugasToUser,
   createCabang,
   createDinas,
@@ -9,11 +12,13 @@ import {
   deleteCabang,
   deleteDinas,
   deleteKategori,
+  getAdminLaporanDetail,
   getAdminOverview,
   getAdminUserDetail,
   listAdminCabang,
   listAdminDinas,
   listAdminKategori,
+  listAdminLaporan,
   listAdminUsers,
   removePetugasFromUser,
   resetAdminUserPassword,
@@ -363,6 +368,75 @@ router.post("/users/:id/assign-petugas", async (req, res, next) => {
 router.delete("/users/:id/assign-petugas", async (req, res, next) => {
   try {
     const payload = await removePetugasFromUser(req.params.id);
+    res.json(buildDataResponse(payload));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ─── Laporan Routes ────────────────────────────────────────────────────────────
+
+// GET /api/admin/laporan
+router.get("/laporan", async (req, res, next) => {
+  try {
+    const pagination = parsePagination(req.query, { defaultLimit: 20, maxLimit: 100 });
+    const payload = await listAdminLaporan({
+      pagination,
+      search: getStringQuery(req.query.search),
+      status: getStringQuery(req.query.status),
+      dinasId: getStringQuery(req.query.dinasId),
+      cabangDinasId: getStringQuery(req.query.cabangDinasId),
+      kategoriId: getStringQuery(req.query.kategoriId),
+    });
+    res.json(buildListResponse(payload.data, pagination, payload.total));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/admin/laporan/:id
+router.get("/laporan/:id", async (req, res, next) => {
+  try {
+    const payload = await getAdminLaporanDetail(req.params.id);
+    res.json(buildDataResponse(payload));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PATCH /api/admin/laporan/:id/status
+router.patch("/laporan/:id/status", async (req, res, next) => {
+  try {
+    const payload = await adminUpdateLaporanStatus({
+      id: req.params.id,
+      status: getStringQuery(req.body.status) ?? "",
+      agencyNote: getStringQuery(req.body.agencyNote),
+      resolutionNote: getStringQuery(req.body.resolutionNote),
+      adminUserId: req.user.id,
+    });
+    res.json(buildDataResponse(payload));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PATCH /api/admin/laporan/:id/assign
+router.patch("/laporan/:id/assign", async (req, res, next) => {
+  try {
+    const payload = await adminAssignLaporan(
+      req.params.id,
+      getStringQuery(req.body.cabangDinasId) ?? "",
+    );
+    res.json(buildDataResponse(payload));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// DELETE /api/admin/laporan/:id
+router.delete("/laporan/:id", async (req, res, next) => {
+  try {
+    const payload = await adminDeleteLaporan(req.params.id);
     res.json(buildDataResponse(payload));
   } catch (error) {
     next(error);

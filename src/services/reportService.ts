@@ -644,6 +644,8 @@ async function getReportLocationPayload(where: Prisma.LaporanWhereInput) {
         id: true,
         title: true,
         agencyNote: true,
+        resolutionNote: true,
+        images: true,
         latitude: true,
         longitude: true,
         status: true,
@@ -658,6 +660,7 @@ async function getReportLocationPayload(where: Prisma.LaporanWhereInput) {
         aiReasoning: true,
         createdAt: true,
         updatedAt: true,
+        createdBy: { select: { id: true, name: true } },
         kategori: {
           select: {
             id: true,
@@ -692,6 +695,8 @@ async function getReportLocationPayload(where: Prisma.LaporanWhereInput) {
       id: report.id,
       title: report.title,
       agencyNote: report.agencyNote,
+      resolutionNote: (report as any).resolutionNote ?? null,
+      images: report.images ?? [],
       lat: report.latitude,
       lng: report.longitude,
       status: report.status,
@@ -699,6 +704,7 @@ async function getReportLocationPayload(where: Prisma.LaporanWhereInput) {
       urgencyScore: report.aiUrgencyScore,
       createdAt: report.createdAt,
       updatedAt: report.updatedAt,
+      createdBy: report.createdBy ?? null,
       kategori: report.kategori,
       dinas: report.kategori?.dinas ?? null,
       cabangDinas: report.cabangDinas,

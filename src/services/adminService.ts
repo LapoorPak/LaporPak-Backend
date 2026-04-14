@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { hashPassword } from "better-auth/crypto";
 import { prisma } from "../config/db.js";
-import { Prisma } from "../generated/prisma/client.js";
+import { LaporanStatus, Prisma } from "../generated/prisma/client.js";
 import { AppError } from "../middleware/authMiddleware.js";
 import type {
   ListAdminCabangInput,
@@ -22,6 +22,8 @@ export async function getAdminOverview() {
     bannedUsers,
     totalPetugas,
     totalReports,
+    statusCounts,
+    topDinasRaw,
   ] = await Promise.all([
     prisma.dinas.count(),
     prisma.dinas.count({ where: { isActive: true } }),
@@ -33,21 +35,82 @@ export async function getAdminOverview() {
     prisma.user.count({ where: { banned: true } }),
     prisma.petugasDinas.count(),
     prisma.laporan.count(),
+    prisma.laporan.groupBy({ by: ["status"], _count: { _all: true } }),
+    prisma.laporan.groupBy({
+      by: ["kategoriId"],
+      _count: { _all: true },
+      where: { kategoriId: { not: null } },
+      orderBy: { _count: { kategoriId: "desc" } },
+      take: 20,
+    }),
   ]);
 
+  const byStatus: Record<string, number> = {};
+  for (const row of statusCounts) {
+    byStatus[row.status] = row._count._all;
+  }
+
+  // Aggregate report counts by dinasId via kategori relation
+  const topKategoriRaw = topDinasRaw; // renamed for clarity (was topDinasRaw, now by kategoriId)
+  const kategoriIds = topKategoriRaw.map((r) => r.kategoriId).filter(Boolean) as string[];
+  const kategoriList = kategoriIds.length > 0
+    ? await prisma.kategoriLaporan.findMany({
+        where: { id: { in: kategoriIds } },
+        select: { id: true, dinasId: true },
+      })
+    : [];
+
+  const kategoriToDinas = new Map(kategoriList.map((k) => [k.id, k.dinasId]));
+  const dinasCounts: Record<string, number> = {};
+  for (const row of topKategoriRaw) {
+    if (row.kategoriId) {
+      const dinasId = kategoriToDinas.get(row.kategoriId);
+      if (dinasId) {
+        dinasCounts[dinasId] = (dinasCounts[dinasId] ?? 0) + row._count._all;
+      }
+    }
+  }
+
+  const topDinasEntries = Object.entries(dinasCounts)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 5);
+  const topDinasIds = topDinasEntries.map(([id]) => id);
+
+  const dinasMap = topDinasIds.length > 0
+    ? Object.fromEntries(
+        (await prisma.dinas.findMany({
+          where: { id: { in: topDinasIds } },
+          select: { id: true, name: true, short: true },
+        })).map((d) => [d.id, d]),
+      )
+    : {};
+
+  const topDinas = topDinasEntries
+    .filter(([dinasId]) => dinasMap[dinasId])
+    .map(([dinasId, count]) => ({
+      name: dinasMap[dinasId].name,
+      short: dinasMap[dinasId].short ?? undefined,
+      count,
+    }));
+
   return {
-    totals: {
-      dinas: totalDinas,
-      dinasActive: activeDinas,
-      cabang: totalCabang,
-      cabangActive: activeCabang,
-      kategori: totalKategori,
-      kategoriActive: activeKategori,
-      users: totalUsers,
-      usersBanned: bannedUsers,
-      petugas: totalPetugas,
-      reports: totalReports,
+    dinas: totalDinas,
+    dinasActive: activeDinas,
+    cabang: totalCabang,
+    cabangActive: activeCabang,
+    kategori: totalKategori,
+    kategoriActive: activeKategori,
+    users: {
+      total: totalUsers,
+      banned: bannedUsers,
+      active: totalUsers - bannedUsers,
     },
+    petugas: totalPetugas,
+    reports: {
+      total: totalReports,
+      byStatus,
+    },
+    topDinas,
   };
 }
 
@@ -639,6 +702,159 @@ export async function assignPetugasToUser(input: {
     petugas,
     cabangDinas: cabang,
   };
+}
+
+// ─── Admin Laporan Management ──────────────────────────────────────────────────
+
+export async function listAdminLaporan(input: {
+  pagination: { skip: number; take: number };
+  search?: string;
+  status?: string;
+  dinasId?: string;
+  cabangDinasId?: string;
+  kategoriId?: string;
+}) {
+  const filters: Prisma.LaporanWhereInput[] = [];
+
+  if (input.status && Object.values(LaporanStatus).includes(input.status as LaporanStatus)) {
+    filters.push({ status: input.status as LaporanStatus });
+  }
+
+  if (input.dinasId) {
+    filters.push({ kategori: { dinasId: input.dinasId } });
+  }
+
+  if (input.cabangDinasId) {
+    filters.push({ cabangDinasId: input.cabangDinasId });
+  }
+
+  if (input.kategoriId) {
+    filters.push({ kategoriId: input.kategoriId });
+  }
+
+  if (input.search) {
+    filters.push({
+      OR: [
+        { title: { contains: input.search, mode: "insensitive" } },
+        { description: { contains: input.search, mode: "insensitive" } },
+        { address: { contains: input.search, mode: "insensitive" } },
+        { kategori: { name: { contains: input.search, mode: "insensitive" } } },
+        { cabangDinas: { name: { contains: input.search, mode: "insensitive" } } },
+        { createdBy: { name: { contains: input.search, mode: "insensitive" } } },
+      ],
+    });
+  }
+
+  const where: Prisma.LaporanWhereInput = filters.length > 0 ? { AND: filters } : {};
+
+  const [data, total] = await Promise.all([
+    prisma.laporan.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip: input.pagination.skip,
+      take: input.pagination.take,
+      include: {
+        kategori: { include: { dinas: { select: { id: true, code: true, name: true, short: true } } } },
+        cabangDinas: { select: { id: true, name: true, wilayah: true } },
+        createdBy: { select: { id: true, name: true, email: true, image: true } },
+      },
+    }),
+    prisma.laporan.count({ where }),
+  ]);
+
+  return { data, total };
+}
+
+export async function getAdminLaporanDetail(id: string) {
+  const laporan = await prisma.laporan.findUnique({
+    where: { id },
+    include: {
+      kategori: { include: { dinas: true } },
+      cabangDinas: { include: { dinas: true } },
+      createdBy: { select: { id: true, name: true, email: true, image: true } },
+      assignedTo: { select: { id: true, name: true, email: true, image: true } },
+      resolvedBy: { select: { id: true, name: true, email: true } },
+    },
+  });
+
+  if (!laporan) {
+    throw new AppError("Laporan tidak ditemukan", 404);
+  }
+
+  return laporan;
+}
+
+export async function adminUpdateLaporanStatus(input: {
+  id: string;
+  status: string;
+  agencyNote?: string | null;
+  resolutionNote?: string | null;
+  adminUserId: string;
+}) {
+  const laporan = await prisma.laporan.findUnique({ where: { id: input.id } });
+  if (!laporan) {
+    throw new AppError("Laporan tidak ditemukan", 404);
+  }
+
+  const validStatuses = ["pending", "verified", "in_progress", "resolved", "rejected"];
+  if (!validStatuses.includes(input.status)) {
+    throw new AppError(`Status tidak valid. Harus salah satu dari: ${validStatuses.join(", ")}`, 400);
+  }
+
+  return prisma.laporan.update({
+    where: { id: input.id },
+    data: {
+      status: input.status as LaporanStatus,
+      ...(input.agencyNote !== undefined ? { agencyNote: input.agencyNote } : {}),
+      ...(input.resolutionNote !== undefined ? { resolutionNote: input.resolutionNote } : {}),
+      resolvedAt: input.status === "resolved" ? new Date() : undefined,
+      resolvedById: input.status === "resolved" ? input.adminUserId : undefined,
+    },
+    include: {
+      kategori: { include: { dinas: true } },
+      cabangDinas: { include: { dinas: true } },
+      createdBy: { select: { id: true, name: true, email: true, image: true } },
+    },
+  });
+}
+
+export async function adminAssignLaporan(id: string, cabangDinasId: string) {
+  const [laporan, cabang] = await Promise.all([
+    prisma.laporan.findUnique({ where: { id } }),
+    prisma.cabangDinas.findUnique({ where: { id: cabangDinasId } }),
+  ]);
+
+  if (!laporan) {
+    throw new AppError("Laporan tidak ditemukan", 404);
+  }
+
+  if (!cabang) {
+    throw new AppError("Cabang dinas tidak ditemukan", 404);
+  }
+
+  return prisma.laporan.update({
+    where: { id },
+    data: {
+      cabangDinasId,
+      routingStatus: "manually_assigned",
+      status: laporan.status === LaporanStatus.pending ? LaporanStatus.verified : laporan.status,
+    },
+    include: {
+      kategori: { include: { dinas: true } },
+      cabangDinas: { include: { dinas: true } },
+      createdBy: { select: { id: true, name: true, email: true, image: true } },
+    },
+  });
+}
+
+export async function adminDeleteLaporan(id: string) {
+  const laporan = await prisma.laporan.findUnique({ where: { id } });
+  if (!laporan) {
+    throw new AppError("Laporan tidak ditemukan", 404);
+  }
+
+  await prisma.laporan.delete({ where: { id } });
+  return { id };
 }
 
 export async function removePetugasFromUser(userId: string) {
