@@ -24,7 +24,7 @@ import type {
 } from "../types/report.js";
 
 const VALID_STATUSES = Object.values(LaporanStatus);
-const DASHBOARD_TABS = ["semua", "baru", "diproses", "tuntas"] as const;
+const DASHBOARD_TABS = ["semua", "baru", "diproses", "klarifikasi", "tuntas"] as const;
 const DASHBOARD_DATE_FORMATTER = new Intl.DateTimeFormat("id-ID", {
   timeZone: "Asia/Jakarta",
   day: "2-digit",
@@ -38,6 +38,7 @@ const reportCreateInclude = {
   kategori: { include: { dinas: true } },
   cabangDinas: { include: { dinas: true } },
   createdBy: { select: { id: true, name: true, image: true } },
+  timeline: { orderBy: { createdAt: "asc" } },
 } satisfies Prisma.LaporanInclude;
 
 const reportDetailInclude = {
@@ -45,6 +46,7 @@ const reportDetailInclude = {
   cabangDinas: { include: { dinas: true } },
   createdBy: { select: { id: true, name: true, image: true } },
   assignedTo: { select: { id: true, name: true, image: true } },
+  timeline: { orderBy: { createdAt: "asc" } },
 } satisfies Prisma.LaporanInclude;
 
 function validateReportStatus(status?: string) {
@@ -122,6 +124,28 @@ function normalizeOptionalText(value: unknown) {
   return value.trim() || null;
 }
 
+function normalizeImagePaths(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((image): image is string => typeof image === "string" && image.trim().length > 0)
+    : [];
+}
+
+function buildTimelineEntry(input: {
+  status: LaporanStatus;
+  note?: string | null;
+  images?: string[];
+  actorId?: string | null;
+  actorRole?: string | null;
+}) {
+  return {
+    status: input.status,
+    note: input.note ?? null,
+    images: input.images ?? [],
+    actorId: input.actorId ?? null,
+    actorRole: input.actorRole ?? null,
+  };
+}
+
 function buildAiReview(input: {
   accepted: boolean;
   confidence: number;
@@ -176,6 +200,26 @@ function buildPersistedAiReview(report: {
     gambarDiabaikanAi: [],
     petunjukGambarAi: null,
   };
+}
+
+function buildTimelinePayload(
+  timeline?: Array<{
+    id: string;
+    status: LaporanStatus;
+    note: string | null;
+    images: string[];
+    actorRole: string | null;
+    createdAt: Date;
+  }>,
+) {
+  return (timeline ?? []).map((item) => ({
+    id: item.id,
+    status: item.status,
+    note: item.note,
+    images: item.images ?? [],
+    actorRole: item.actorRole,
+    createdAt: item.createdAt,
+  }));
 }
 
 function buildUnavailableAiAnalysis(input: {
@@ -341,6 +385,8 @@ function buildReportDashboardTabWhere(tab: DashboardTab): Prisma.LaporanWhereInp
       return { status: { in: [LaporanStatus.pending, LaporanStatus.verified] } };
     case "diproses":
       return { status: LaporanStatus.in_progress };
+    case "klarifikasi":
+      return { status: LaporanStatus.clarification_requested };
     case "tuntas":
       return { status: LaporanStatus.resolved };
     case "semua":
@@ -368,6 +414,12 @@ function getDashboardStatusPresentation(status: LaporanStatus) {
         label: "Diproses",
         group: "diproses" as const,
         tone: "warning",
+      };
+    case LaporanStatus.clarification_requested:
+      return {
+        label: "Butuh Klarifikasi",
+        group: "klarifikasi" as const,
+        tone: "danger",
       };
     case LaporanStatus.resolved:
       return {
@@ -398,6 +450,7 @@ async function getReportDashboardSummary(where: Prisma.LaporanWhereInput) {
     pending: 0,
     verified: 0,
     in_progress: 0,
+    clarification_requested: 0,
     resolved: 0,
     rejected: 0,
   };
@@ -408,13 +461,15 @@ async function getReportDashboardSummary(where: Prisma.LaporanWhereInput) {
 
   const laporanBaru = counts.pending + counts.verified;
   const diproses = counts.in_progress;
+  const klarifikasi = counts.clarification_requested;
   const tuntas = counts.resolved;
-  const totalTarget = laporanBaru + diproses + tuntas;
+  const totalTarget = laporanBaru + diproses + klarifikasi + tuntas;
 
   return {
     totalTarget,
     laporanBaru,
     diproses,
+    klarifikasi,
     tuntas,
     byStatusRaw: counts,
   };
@@ -636,7 +691,10 @@ function buildReportLocationWhere(input: {
   return { AND: filters };
 }
 
-async function getReportLocationPayload(where: Prisma.LaporanWhereInput) {
+async function getReportLocationPayload(
+  where: Prisma.LaporanWhereInput,
+  viewer?: { role?: string; dinasId?: string | null },
+) {
   const [reports, total, stats] = await Promise.all([
     prisma.laporan.findMany({
       where,
@@ -645,6 +703,7 @@ async function getReportLocationPayload(where: Prisma.LaporanWhereInput) {
         title: true,
         agencyNote: true,
         resolutionNote: true,
+        resolutionImages: true,
         images: true,
         latitude: true,
         longitude: true,
@@ -683,6 +742,17 @@ async function getReportLocationPayload(where: Prisma.LaporanWhereInput) {
             wilayah: true,
           },
         },
+        timeline: {
+          orderBy: { createdAt: "asc" },
+          select: {
+            id: true,
+            status: true,
+            note: true,
+            images: true,
+            actorRole: true,
+            createdAt: true,
+          },
+        },
       },
       orderBy: { createdAt: "desc" },
     }),
@@ -695,7 +765,8 @@ async function getReportLocationPayload(where: Prisma.LaporanWhereInput) {
       id: report.id,
       title: report.title,
       agencyNote: report.agencyNote,
-      resolutionNote: (report as any).resolutionNote ?? null,
+      resolutionNote: report.resolutionNote ?? null,
+      resolutionImages: report.resolutionImages ?? [],
       images: report.images ?? [],
       lat: report.latitude,
       lng: report.longitude,
@@ -708,6 +779,15 @@ async function getReportLocationPayload(where: Prisma.LaporanWhereInput) {
       kategori: report.kategori,
       dinas: report.kategori?.dinas ?? null,
       cabangDinas: report.cabangDinas,
+      canEdit:
+        viewer?.role === "admin" ||
+        Boolean(viewer?.dinasId && report.kategori?.dinas?.id === viewer.dinasId),
+      ownership:
+        viewer?.role === "admin" ||
+        Boolean(viewer?.dinasId && report.kategori?.dinas?.id === viewer.dinasId)
+          ? "mine"
+          : "other",
+      timeline: buildTimelinePayload(report.timeline),
       aiReview: buildPersistedAiReview(report),
     })),
     total,
@@ -752,6 +832,15 @@ async function createRejectedReportResult(input: {
         gambarDiabaikanAi: input.analysis.ignoredImagePaths,
         petunjukGambarAi: getImageInputHint(input.analysis.ignoredImagePaths),
       } as Prisma.InputJsonValue,
+      timeline: {
+        create: buildTimelineEntry({
+          status: LaporanStatus.rejected,
+          note: input.analysis.rejectionReason ?? input.analysis.reasoning,
+          images: input.analysis.acceptedImagePaths,
+          actorId: null,
+          actorRole: "ai",
+        }),
+      },
     },
     include: reportCreateInclude,
   });
@@ -766,6 +855,7 @@ async function createRejectedReportResult(input: {
 
   return {
     ...rejectedReport,
+    timeline: buildTimelinePayload(rejectedReport.timeline),
     aiReview: buildAiReview({
       accepted: false,
       confidence: input.analysis.confidence,
@@ -793,6 +883,41 @@ async function getReportOrThrow(id: string) {
   return laporan;
 }
 
+async function assertReportEditableByUser(id: string, userId: string) {
+  const [laporan, user] = await Promise.all([
+    prisma.laporan.findUnique({
+      where: { id },
+      include: { kategori: { include: { dinas: true } } },
+    }),
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        role: true,
+        petugas: {
+          select: {
+            cabangDinas: { select: { dinasId: true } },
+          },
+        },
+      },
+    }),
+  ]);
+
+  if (!laporan) {
+    throw new AppError("Report not found", 404);
+  }
+
+  if (user?.role === "admin") {
+    return laporan;
+  }
+
+  const officerDinasId = user?.petugas?.cabangDinas.dinasId;
+  if (!officerDinasId || laporan.kategori?.dinasId !== officerDinasId) {
+    throw new AppError("Forbidden", 403);
+  }
+
+  return laporan;
+}
+
 export async function listReports(input: ListReportsInput) {
   const status = validateReportStatus(input.status);
   const where: Prisma.LaporanWhereInput = {
@@ -808,6 +933,7 @@ export async function listReports(input: ListReportsInput) {
         kategori: { include: { dinas: true } },
         cabangDinas: { include: { dinas: true } },
         createdBy: { select: { id: true, name: true, image: true } },
+        timeline: { orderBy: { createdAt: "asc" } },
       },
       orderBy: { createdAt: "desc" },
       skip: input.pagination.skip,
@@ -820,6 +946,7 @@ export async function listReports(input: ListReportsInput) {
   return {
     data: laporan.map((item) => ({
       ...item,
+      timeline: buildTimelinePayload(item.timeline),
       aiReview: buildPersistedAiReview(item),
     })),
     total,
@@ -842,6 +969,7 @@ export async function listMyReports(input: ListMyReportsInput) {
       include: {
         kategori: { include: { dinas: true } },
         cabangDinas: { include: { dinas: true } },
+        timeline: { orderBy: { createdAt: "asc" } },
       },
       orderBy: { createdAt: "desc" },
       skip: input.pagination.skip,
@@ -854,6 +982,7 @@ export async function listMyReports(input: ListMyReportsInput) {
   return {
     data: laporan.map((item) => ({
       ...item,
+      timeline: buildTimelinePayload(item.timeline),
       aiReview: buildPersistedAiReview(item),
     })),
     total,
@@ -862,10 +991,33 @@ export async function listMyReports(input: ListMyReportsInput) {
 }
 
 export async function listReportLocations(input: ListReportLocationsInput) {
+  let scopedDinasId = input.dinasId;
+  let viewerDinasId: string | null = null;
+
+  if (input.scope && input.role && input.role !== "warga" && input.role !== "admin") {
+    if (!input.userId) {
+      throw new AppError("Unauthorized", 401);
+    }
+
+    const officer = await prisma.petugasDinas.findUnique({
+      where: { userId: input.userId },
+      select: { cabangDinas: { select: { dinasId: true } } },
+    });
+
+    if (!officer) {
+      throw new AppError("Akun dinas belum terhubung ke cabang dinas", 403);
+    }
+
+    viewerDinasId = officer.cabangDinas.dinasId;
+    scopedDinasId = viewerDinasId;
+  } else if (input.role === "admin") {
+    viewerDinasId = input.dinasId ?? null;
+  }
+
   const where = buildReportLocationWhere({
     status: validateReportStatus(input.status),
     kategoriId: input.kategoriId,
-    dinasId: input.dinasId,
+    dinasId: scopedDinasId,
     cabangDinasId: input.cabangDinasId,
     createdById: input.createdById,
     search: input.search,
@@ -876,7 +1028,7 @@ export async function listReportLocations(input: ListReportLocationsInput) {
     excludeRejected: true,
   });
 
-  return getReportLocationPayload(where);
+  return getReportLocationPayload(where, { role: input.role, dinasId: viewerDinasId });
 }
 
 export async function getReportDashboard(input: GetReportDashboardInput) {
@@ -1001,6 +1153,7 @@ export async function getReportDashboard(input: GetReportDashboardInput) {
         { key: "semua", label: "Semua", total: summary.totalTarget },
         { key: "baru", label: "Baru", total: summary.laporanBaru },
         { key: "diproses", label: "Diproses", total: summary.diproses },
+        { key: "klarifikasi", label: "Klarifikasi", total: summary.klarifikasi },
         { key: "tuntas", label: "Tuntas", total: summary.tuntas },
       ],
     },
@@ -1144,6 +1297,7 @@ export async function createReport(input: CreateReportInput) {
     data: {
       title: input.title,
       description: input.description,
+      status: LaporanStatus.verified,
       kategoriId: resolvedKategori!.id,
       cabangDinasId: routing?.assignedCabang?.id ?? null,
       latitude: latitudeValue,
@@ -1166,6 +1320,24 @@ export async function createReport(input: CreateReportInput) {
       aiRouteMeta: routing
         ? (buildRoutingMeta(routing) as unknown as Prisma.InputJsonValue)
         : Prisma.JsonNull,
+      timeline: {
+        create: [
+          buildTimelineEntry({
+            status: LaporanStatus.pending,
+            note: "Laporan dibuat warga dan masuk validasi AI.",
+            images: analysis.acceptedImagePaths,
+            actorId: input.createdById,
+            actorRole: "warga",
+          }),
+          buildTimelineEntry({
+            status: LaporanStatus.verified,
+            note: analysis.reasoning,
+            images: [],
+            actorId: null,
+            actorRole: "ai",
+          }),
+        ],
+      },
     },
     include: reportCreateInclude,
   });
@@ -1194,6 +1366,7 @@ export async function createReport(input: CreateReportInput) {
 
   return {
     ...laporan,
+    timeline: buildTimelinePayload(laporan.timeline),
     aiReview: buildAiReview({
       accepted: true,
       confidence: analysis.confidence,
@@ -1218,24 +1391,41 @@ export async function getReportById(id: string) {
 
   return {
     ...laporan,
+    timeline: buildTimelinePayload(laporan.timeline),
     aiReview: buildPersistedAiReview(laporan),
   };
 }
 
 export async function updateReportStatus(input: UpdateReportStatusInput) {
   const status = requireReportStatus(input.status);
-  await getReportOrThrow(input.id);
+  if (status === LaporanStatus.resolved) {
+    throw new AppError("Gunakan endpoint resolve dan sertakan bukti foto penyelesaian.", 400);
+  }
+
+  await assertReportEditableByUser(input.id, input.userId);
   const agencyNote = normalizeOptionalText(input.agencyNote ?? input.resolutionNote);
   const resolutionNote = normalizeOptionalText(input.resolutionNote);
+
+  if (status === LaporanStatus.clarification_requested && !agencyNote) {
+    throw new AppError("Catatan klarifikasi wajib diisi.", 400);
+  }
 
   const laporan = await prisma.laporan.update({
     where: { id: input.id },
     data: {
       status,
       ...(input.agencyNote !== undefined || input.resolutionNote !== undefined ? { agencyNote } : {}),
-      resolvedAt: status === "resolved" ? new Date() : null,
-      resolvedById: status === "resolved" ? input.userId : null,
-      resolutionNote: status === "resolved" ? resolutionNote : null,
+      resolvedAt: null,
+      resolvedById: null,
+      resolutionNote: null,
+      timeline: {
+        create: buildTimelineEntry({
+          status,
+          note: status === LaporanStatus.clarification_requested ? agencyNote : agencyNote ?? resolutionNote,
+          actorId: input.userId,
+          actorRole: "dinas",
+        }),
+      },
     },
     include: reportDetailInclude,
   });
@@ -1255,14 +1445,20 @@ export async function updateReportStatus(input: UpdateReportStatusInput) {
 
   return {
     ...laporan,
+    timeline: buildTimelinePayload(laporan.timeline),
     aiReview: buildPersistedAiReview(laporan),
   };
 }
 
 export async function resolveReport(input: ResolveReportInput) {
-  await getReportOrThrow(input.id);
+  await assertReportEditableByUser(input.id, input.userId);
   const agencyNote = normalizeOptionalText(input.agencyNote ?? input.resolutionNote);
   const resolutionNote = normalizeOptionalText(input.resolutionNote);
+  const resolutionImages = normalizeImagePaths(input.resolutionImages);
+
+  if (resolutionImages.length === 0) {
+    throw new AppError("Bukti foto penyelesaian wajib diupload.", 400);
+  }
 
   const laporan = await prisma.laporan.update({
     where: { id: input.id },
@@ -1272,6 +1468,16 @@ export async function resolveReport(input: ResolveReportInput) {
       resolvedById: input.userId,
       ...(input.agencyNote !== undefined || input.resolutionNote !== undefined ? { agencyNote } : {}),
       resolutionNote,
+      resolutionImages,
+      timeline: {
+        create: buildTimelineEntry({
+          status: LaporanStatus.resolved,
+          note: resolutionNote ?? agencyNote,
+          images: resolutionImages,
+          actorId: input.userId,
+          actorRole: "dinas",
+        }),
+      },
     },
     include: reportDetailInclude,
   });
@@ -1291,6 +1497,7 @@ export async function resolveReport(input: ResolveReportInput) {
 
   return {
     ...laporan,
+    timeline: buildTimelinePayload(laporan.timeline),
     aiReview: buildPersistedAiReview(laporan),
   };
 }
