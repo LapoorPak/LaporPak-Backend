@@ -115,9 +115,12 @@ router.get("/me", requireAuth, async (req, res, next) => {
 });
 
 // GET /api/reports/locations
-router.get("/locations", async (req, res, next) => {
+router.get("/locations", requireAuth, async (req, res, next) => {
   try {
     const payload = await listReportLocations({
+      userId: req.user.id,
+      role: req.user.role,
+      scope: getStringQuery(req.query.scope) === "all" ? "all" : getStringQuery(req.query.scope) === "mine" ? "mine" : undefined,
       status: getStringQuery(req.query.status),
       kategoriId: getStringQuery(req.query.kategoriId),
       dinasId: getStringQuery(req.query.dinasId),
@@ -143,6 +146,7 @@ router.get("/dashboard", requireAuth, requireAgencyRole, async (req, res, next) 
       pagination,
       userId: req.user.id,
       role: req.user.role,
+      scope: getStringQuery(req.query.scope) === "all" ? "all" : "mine",
       tab: getStringQuery(req.query.tab),
       requestedDinasId: getStringQuery(req.query.dinasId),
       requestedCabangDinasId: getStringQuery(req.query.cabangDinasId),
@@ -207,13 +211,16 @@ router.post("/:id/status", requireAuth, requireAgencyRole, async (req, res, next
 });
 
 // POST /api/reports/:id/resolve
-router.post("/:id/resolve", requireAuth, requireAgencyRole, async (req, res, next) => {
+router.post("/:id/resolve", requireAuth, requireAgencyRole, upload.array("resolutionImages", 5), async (req, res, next) => {
   try {
+    const uploadedResolutionImages = getUploadedImagePaths(req.files);
+    const bodyResolutionImages = getBodyStringArray(req.body.resolutionImages);
     const laporan = await resolveReport({
       id: String(req.params.id),
       userId: req.user.id,
       resolutionNote: req.body.resolutionNote,
       agencyNote: getBodyString(req.body.agencyNote) ?? getBodyString(req.body.catatanDinas),
+      resolutionImages: [...uploadedResolutionImages, ...bodyResolutionImages],
     });
 
     res.json(buildDataResponse(laporan));
