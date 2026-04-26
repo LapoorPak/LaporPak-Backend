@@ -258,6 +258,7 @@ export async function getAgencyStats(id: string) {
     pending: 0,
     verified: 0,
     in_progress: 0,
+    clarification_requested: 0,
     resolved: 0,
     rejected: 0,
     total: 0,

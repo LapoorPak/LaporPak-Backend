@@ -76,6 +76,12 @@ export function officerStatusNotification(
       tag: "Proses",
       message: `Laporan "${laporanTitle}" sedang ditangani oleh ${assigneeName || "petugas"}.`,
     },
+    clarification_requested: {
+      type: "warning",
+      title: "Klarifikasi Diminta",
+      tag: "Klarifikasi",
+      message: `Laporan "${laporanTitle}" membutuhkan klarifikasi tambahan dari warga.`,
+    },
     resolved: {
       type: "success",
       title: "Laporan Diselesaikan",
@@ -112,6 +118,12 @@ export function citizenStatusNotification(
       title: "Laporan Sedang Ditangani",
       tag: "Proses",
       message: `Laporan Anda "${laporanTitle}" sedang ditangani oleh ${dinasName}.`,
+    },
+    clarification_requested: {
+      type: "warning",
+      title: "Klarifikasi Diperlukan",
+      tag: "Klarifikasi",
+      message: `${dinasName} meminta klarifikasi tambahan untuk laporan Anda "${laporanTitle}".`,
     },
     resolved: {
       type: "success",
