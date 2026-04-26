@@ -11,8 +11,13 @@ const CATEGORY_DINAS_MAP = new Map(
   REPORT_CATEGORIES.map((category) => [category.code, category.dinasCode]),
 );
 const MAX_IMAGES = 5;
+const MAX_AI_IMAGE_BYTES = 5 * 1024 * 1024;
+const SUPPORTED_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const LOCAL_UPLOAD_PREFIX = `${UPLOAD_PUBLIC_PATH}/`;
-const PUBLIC_LIGHT_HINTS = ["lampu jalan", "pju", "tiang lampu", "jalan", "fasilitas umum"];
+
+type GeminiContentPart =
+  | { text: string }
+  | { inlineData: { data: string; mimeType: string } };
 
 export interface ClassificationResult {
   categoryCode: string;
@@ -38,7 +43,7 @@ export function getDinasTypeForCategory(categoryCode: string): string | undefine
   return CATEGORY_DINAS_MAP.get(categoryCode);
 }
 
-function buildPrompt(title: string, description: string) {
+function buildPrompt(title: string, description: string, imageCount: number) {
   const categoryList = REPORT_CATEGORIES.map(
     (category) => `- ${category.code}: ${category.name} - ${category.description}`,
   ).join("\n");
@@ -46,9 +51,10 @@ function buildPrompt(title: string, description: string) {
   return `Anda adalah AI wrapper untuk aplikasi pengaduan warga Indonesia bernama LaporPak.
 
 Tugas Anda:
-1. Menilai apakah laporan warga cukup jelas, serius, dan layak diproses.
+1. Menilai teks laporan DAN ${imageCount} foto bukti yang dilampirkan.
 2. Menolak laporan yang terlalu samar, bercanda, spam, atau tidak terkait masalah publik.
-3. Jika laporan layak diproses, klasifikasikan ke tepat satu kategori resmi.
+3. Menolak laporan jika foto tidak menunjukkan masalah fasilitas publik/infrastruktur/lingkungan yang relevan.
+4. Jika teks dan foto sama-sama layak diproses, klasifikasikan ke tepat satu kategori resmi.
 
 Tolak laporan jika:
 - terlalu pendek atau terlalu samar
@@ -56,10 +62,14 @@ Tolak laporan jika:
 - ambigu antara masalah pribadi dan masalah fasilitas umum/publik
 - tidak jelas menggambarkan layanan publik, fasilitas umum, infrastruktur kota, atau kondisi darurat
 - tidak punya detail yang cukup untuk dipetakan ke satu kategori
+- foto tidak ada, tidak bisa dinilai, buram/gelap total, screenshot/meme/selfie, atau tidak memperlihatkan masalah publik
+- isi foto bertentangan dengan judul/deskripsi, misalnya teks melapor jalan rusak tetapi foto tidak menunjukkan jalan/kerusakan
 
 Aturan penting:
 - "mati lampu" itu ambigu dan harus ditolak kecuali jelas maksudnya lampu jalan, PJU, atau fasilitas umum lain
 - jangan memaksa memilih kategori kalau laporannya tidak jelas
+- jangan menerima laporan hanya dari teks; minimal satu foto harus mendukung objek masalah dan kategori yang dipilih
+- sebutkan di reasoning bukti visual apa yang terlihat atau kenapa foto tidak mendukung
 
 Daftar kategori resmi:
 ${categoryList}
@@ -71,7 +81,7 @@ Balas HANYA dengan JSON valid. Semua isi teks wajib dalam bahasa Indonesia:
 {"accepted": true, "rejectionCode": null, "rejectionReason": null, "suggestedRewrite": null, "categoryCode": "<one of the category codes above or null>", "confidence": 0.0, "clarityScore": 0, "seriousnessScore": 0, "reasoning": "<short explanation in Indonesian>"}`;
 }
 
-function getMimeType(ext: string): string {
+function getMimeType(ext: string): string | null {
   const map: Record<string, string> = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
@@ -79,15 +89,17 @@ function getMimeType(ext: string): string {
     ".webp": "image/webp",
   };
 
-  return map[ext.toLowerCase()] || "image/jpeg";
+  return map[ext.toLowerCase()] ?? null;
+}
+
+function getSupportedMimeTypeFromPath(filePath: string) {
+  const ext = path.extname(filePath).toLowerCase();
+  const mimeType = getMimeType(ext);
+  return mimeType && SUPPORTED_IMAGE_MIME_TYPES.has(mimeType) ? mimeType : null;
 }
 
 function isAcceptedImagePath(imagePath: string) {
-  return (
-    imagePath.startsWith(LOCAL_UPLOAD_PREFIX) ||
-    imagePath.startsWith("http://") ||
-    imagePath.startsWith("https://")
-  );
+  return imagePath.startsWith(LOCAL_UPLOAD_PREFIX);
 }
 
 function sanitizeReportImagePaths(imagePaths?: string[]) {
@@ -110,6 +122,11 @@ function sanitizeReportImagePaths(imagePaths?: string[]) {
       continue;
     }
 
+    if (trimmed.startsWith(LOCAL_UPLOAD_PREFIX) && !getSupportedMimeTypeFromPath(trimmed)) {
+      ignored.push(trimmed);
+      continue;
+    }
+
     accepted.push(trimmed);
 
     if (trimmed.startsWith(LOCAL_UPLOAD_PREFIX)) {
@@ -124,8 +141,10 @@ function sanitizeReportImagePaths(imagePaths?: string[]) {
   };
 }
 
-function loadImageParts(imagePaths: string[]) {
+async function loadImageParts(imagePaths: string[]) {
   const parts: Array<{ inlineData: { data: string; mimeType: string } }> = [];
+  const loadedImagePaths: string[] = [];
+  const ignoredImagePaths: string[] = imagePaths.slice(MAX_IMAGES);
 
   for (const imgPath of imagePaths.slice(0, MAX_IMAGES)) {
     try {
@@ -133,18 +152,35 @@ function loadImageParts(imagePaths: string[]) {
       const absPath = path.join(UPLOAD_DIR, filename);
 
       if (!fs.existsSync(absPath)) {
+        ignoredImagePaths.push(imgPath);
+        continue;
+      }
+
+      const stat = fs.statSync(absPath);
+      if (stat.size > MAX_AI_IMAGE_BYTES) {
+        ignoredImagePaths.push(imgPath);
         continue;
       }
 
       const data = fs.readFileSync(absPath).toString("base64");
-      const ext = path.extname(filename);
-      parts.push({ inlineData: { data, mimeType: getMimeType(ext) } });
+      const mimeType = getSupportedMimeTypeFromPath(filename);
+      if (!mimeType) {
+        ignoredImagePaths.push(imgPath);
+        continue;
+      }
+
+      parts.push({ inlineData: { data, mimeType } });
+      loadedImagePaths.push(imgPath);
     } catch {
-      // Ignore unreadable images and continue.
+      ignoredImagePaths.push(imgPath);
     }
   }
 
-  return parts;
+  return {
+    parts,
+    loadedImagePaths,
+    ignoredImagePaths,
+  };
 }
 
 function normalizeBoundedNumber(value: unknown, min: number, max: number) {
@@ -176,18 +212,6 @@ function parseGeminiJson(rawText: string) {
   }
 }
 
-function normalizeText(text: string) {
-  return text
-    .toLowerCase()
-    .replace(/\blobang\b/g, "lubang")
-    .replace(/\bberlubang\b/g, "lubang")
-    .replace(/\bjalanan\b/g, "jalan")
-    .replace(/\bpju\b/g, "lampu jalan")
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 function buildFallbackRejectedAnalysis(input: {
   sanitizedImages: ReturnType<typeof sanitizeReportImagePaths>;
   rejectionCode: string;
@@ -213,91 +237,24 @@ function buildFallbackRejectedAnalysis(input: {
 }
 
 function analyzeWithHeuristics(
-  input: { title: string; description: string; imagePaths?: string[] },
+  _input: { title: string; description: string; imagePaths?: string[] },
   sanitizedImages: ReturnType<typeof sanitizeReportImagePaths>,
   cause: unknown,
 ): ReportAnalysisResult {
-  const normalizedTitle = normalizeText(input.title);
-  const normalizedDescription = normalizeText(input.description);
-  const normalizedCombined = `${normalizedTitle} ${normalizedDescription}`.trim();
-  const wordCount = normalizedCombined.split(" ").filter(Boolean).length;
   const geminiFailedMessage =
     cause instanceof Error ? cause.message : "AI utama tidak tersedia";
 
-  const ambiguousLampu =
-    (normalizedCombined.includes("mati lampu") || normalizedCombined.includes("lampu mati")) &&
-    !PUBLIC_LIGHT_HINTS.some((hint) => normalizedCombined.includes(hint));
-
-  if (ambiguousLampu) {
-    return buildFallbackRejectedAnalysis({
-      sanitizedImages,
-      rejectionCode: "ambiguous_private_or_public",
-      rejectionReason:
-        "Laporan ambigu antara listrik pribadi dan lampu jalan/fasilitas umum.",
-      suggestedRewrite:
-        "Jelaskan bahwa yang mati adalah lampu jalan atau PJU, lalu sebutkan lokasi yang jelas.",
-      clarityScore: 30,
-      seriousnessScore: 70,
-      reasoning:
-        "Sistem fallback lokal menolak laporan karena frasa 'mati lampu' masih ambigu.",
-    });
-  }
-
-  const categoryScores = REPORT_CATEGORIES.map((category) => {
-    const normalizedKeywords = Array.from(
-      new Set([
-        normalizeText(category.name),
-        normalizeText(category.description),
-        ...category.keywords.map((keyword) => normalizeText(keyword)),
-      ]),
-    ).filter(Boolean);
-
-    const matchedKeywords = normalizedKeywords.filter(
-      (keyword) => keyword && normalizedCombined.includes(keyword),
-    );
-
-    return {
-      category,
-      matchedKeywords,
-      score: matchedKeywords.length,
-    };
-  }).sort((left, right) => right.score - left.score);
-
-  const topMatch = categoryScores[0];
-
-  if (!topMatch || topMatch.score === 0 || (wordCount < 4 && topMatch.score < 2)) {
-    return buildFallbackRejectedAnalysis({
-      sanitizedImages,
-      rejectionCode: "laporan_tidak_cukup_jelas",
-      rejectionReason:
-        "Laporan belum cukup jelas untuk dipetakan ke kategori layanan publik tertentu.",
-      suggestedRewrite:
-        "Sebutkan objek yang bermasalah, jenis kerusakan, lokasi, dan dampaknya bagi warga.",
-      clarityScore: Math.max(20, Math.min(45, normalizedCombined.length * 2)),
-      seriousnessScore: 65,
-      reasoning: `Sistem fallback lokal tidak menemukan kata kunci yang cukup kuat. Penyebab AI utama gagal: ${geminiFailedMessage}`,
-    });
-  }
-
-  const confidence = Math.min(0.82, 0.42 + topMatch.score * 0.14);
-  const clarityScore = Math.min(92, 45 + topMatch.score * 12 + Math.min(wordCount, 12));
-  const seriousnessScore = Math.min(100, Math.max(55, topMatch.category.urgencyWeight));
-  const matchedPhrase =
-    topMatch.matchedKeywords.slice(0, 3).join(", ") || topMatch.category.name;
-
-  return {
-    accepted: true,
-    rejectionCode: null,
-    rejectionReason: null,
-    suggestedRewrite: null,
-    categoryCode: topMatch.category.code,
-    confidence,
-    clarityScore,
-    seriousnessScore,
-    reasoning: `AI utama tidak tersedia, sistem fallback lokal menetapkan kategori ${topMatch.category.name} berdasarkan kata kunci: ${matchedPhrase}.`,
-    acceptedImagePaths: sanitizedImages.accepted,
-    ignoredImagePaths: sanitizedImages.ignored,
-  };
+  return buildFallbackRejectedAnalysis({
+    sanitizedImages,
+    rejectionCode: "ai_vision_unavailable",
+    rejectionReason:
+      "AI vision belum bisa memeriksa foto bukti, jadi laporan tidak disetujui hanya dari teks.",
+    suggestedRewrite:
+      "Coba kirim ulang beberapa saat lagi dengan foto yang jelas memperlihatkan masalah publik.",
+    clarityScore: 0,
+    seriousnessScore: 0,
+    reasoning: `Validasi visual wajib, tetapi AI vision gagal: ${geminiFailedMessage}`,
+  });
 }
 
 export async function analyzeReportSubmission(input: {
@@ -306,13 +263,35 @@ export async function analyzeReportSubmission(input: {
   imagePaths?: string[];
 }): Promise<ReportAnalysisResult> {
   const sanitizedImages = sanitizeReportImagePaths(input.imagePaths);
-  const imageParts = sanitizedImages.localUploadPaths.length
-    ? loadImageParts(sanitizedImages.localUploadPaths)
-    : [];
+  const loadedImages = await loadImageParts(sanitizedImages.accepted);
+  const resultImages = {
+    ...sanitizedImages,
+    accepted: loadedImages.loadedImagePaths,
+    ignored: [...sanitizedImages.ignored, ...loadedImages.ignoredImagePaths],
+    localUploadPaths: loadedImages.loadedImagePaths.filter((imagePath) =>
+      imagePath.startsWith(LOCAL_UPLOAD_PREFIX),
+    ),
+  };
 
-  const contents: Array<
-    { text: string } | { inlineData: { data: string; mimeType: string } }
-  > = [{ text: buildPrompt(input.title, input.description) }, ...imageParts];
+  if (loadedImages.parts.length === 0) {
+    return buildFallbackRejectedAnalysis({
+      sanitizedImages: resultImages,
+      rejectionCode: "foto_bukti_tidak_valid",
+      rejectionReason:
+        "Laporan wajib menyertakan minimal satu foto bukti yang bisa diperiksa oleh AI.",
+      suggestedRewrite:
+        "Upload foto JPG, PNG, atau WebP yang jelas memperlihatkan objek masalah publik yang dilaporkan.",
+      clarityScore: 0,
+      seriousnessScore: 0,
+      reasoning:
+        "Tidak ada foto bukti yang berhasil dibaca untuk validasi visual AI.",
+    });
+  }
+
+  const contents: GeminiContentPart[] = [
+    { text: buildPrompt(input.title, input.description, loadedImages.loadedImagePaths.length) },
+    ...loadedImages.parts,
+  ];
 
   try {
     const response = await ai.models.generateContent({
@@ -338,12 +317,12 @@ export async function analyzeReportSubmission(input: {
       clarityScore: Math.round(normalizeBoundedNumber(parsed.clarityScore, 0, 100)),
       seriousnessScore: Math.round(normalizeBoundedNumber(parsed.seriousnessScore, 0, 100)),
       reasoning: String(parsed.reasoning || ""),
-      acceptedImagePaths: sanitizedImages.accepted,
-      ignoredImagePaths: sanitizedImages.ignored,
+      acceptedImagePaths: resultImages.accepted,
+      ignoredImagePaths: resultImages.ignored,
     };
   } catch (error) {
     console.error("[report-ai] Gemini failed, using heuristic fallback:", error);
-    return analyzeWithHeuristics(input, sanitizedImages, error);
+    return analyzeWithHeuristics(input, resultImages, error);
   }
 }
 
