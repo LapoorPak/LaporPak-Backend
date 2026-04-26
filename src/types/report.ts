@@ -1,7 +1,8 @@
 import type { Prisma } from "../generated/prisma/client.js";
 import type { PaginationParams } from "../utils/apiResponse.js";
 
-export type DashboardTab = "semua" | "baru" | "diproses" | "tuntas";
+export type DashboardTab = "semua" | "baru" | "diproses" | "klarifikasi" | "tuntas";
+export type ReportsScope = "mine" | "all";
 
 export type ResolvedKategori = Prisma.KategoriLaporanGetPayload<{ include: { dinas: true } }>;
 
@@ -17,6 +18,9 @@ export interface ListMyReportsInput extends ListReportsInput {
 }
 
 export interface ListReportLocationsInput {
+  userId?: string;
+  role?: string;
+  scope?: ReportsScope;
   status?: string;
   kategoriId?: string;
   dinasId?: string;
@@ -32,6 +36,7 @@ export interface ListReportLocationsInput {
 export interface GetReportDashboardInput {
   userId: string;
   role: string;
+  scope?: ReportsScope;
   pagination: PaginationParams;
   tab?: string;
   requestedDinasId?: string;
@@ -64,4 +69,5 @@ export interface ResolveReportInput {
   userId: string;
   resolutionNote?: unknown;
   agencyNote?: unknown;
+  resolutionImages?: string[];
 }
