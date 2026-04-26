@@ -11,6 +11,7 @@ enum LaporanStatus {
   pending
   verified
   in_progress
+  clarification_requested
   resolved
   rejected
 }
@@ -196,6 +197,7 @@ model Laporan {
   aiRouteMeta           Json?
   agencyNote            String?
   resolutionNote        String?
+  resolutionImages      String[]             @default([])
   resolvedAt            DateTime?
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
@@ -208,6 +210,7 @@ model Laporan {
 
   notifications   Notification[]
   routingDecisions LaporanRoutingDecision[]
+  timeline         LaporanTimeline[]
 
   @@index([createdById])
   @@index([kategoriId, status])
@@ -215,6 +218,22 @@ model Laporan {
   @@index([routingStatus, createdAt])
   @@index([latitude, longitude])
   @@map("laporan")
+}
+
+model LaporanTimeline {
+  id        String        @id @default(cuid())
+  laporanId String
+  status    LaporanStatus
+  note      String?
+  images    String[]      @default([])
+  actorId   String?
+  actorRole String?
+  createdAt DateTime      @default(now())
+
+  laporan Laporan @relation(fields: [laporanId], references: [id], onDelete: Cascade)
+
+  @@index([laporanId, createdAt])
+  @@map("laporan_timeline")
 }
 
 model LaporanRoutingDecision {
