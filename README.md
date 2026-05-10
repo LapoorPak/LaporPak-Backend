@@ -18,7 +18,7 @@ LaporPak Backend menjadi pusat data dan API untuk frontend LaporPak. Service ini
 | Framework | Express 5, TypeScript |
 | Database | PostgreSQL, Prisma |
 | Auth | Better Auth |
-| Upload | Multer, local upload directory |
+| Upload | Multer memory upload + S3-compatible bucket |
 | Email | Nodemailer, SMTP |
 | Security | Helmet, CORS |
 | AI | Google GenAI / Gemini |
@@ -34,7 +34,7 @@ LaporPak Backend menjadi pusat data dan API untuk frontend LaporPak. Service ini
 - **Agency Portal API** - report queues, dashboard data, status updates, clarification notes, and resolution proof uploads.
 - **Admin API** - overview metrics plus CRUD for dinas, cabang, kategori, users, petugas assignment, and reports.
 - **Notifications** - notification list, unread count, mark one as read, and mark all as read.
-- **Uploads** - static serving for report uploads and office photos.
+- **Uploads** - S3-compatible bucket upload for report photos plus static office photos.
 - **Health Checks** - live and full health endpoints for deployment monitoring.
 - **AI-assisted Review** - Gemini-powered report review flow for validating report context.
 
@@ -75,7 +75,12 @@ SMTP_USER=your_smtp_user
 SMTP_PASS=your_smtp_app_password
 SMTP_FROM="LaporPak <no-reply@example.com>"
 GEMINI_API_KEY=your_gemini_api_key
-UPLOAD_DIR=uploads
+S3_ENDPOINT_URL=https://t3.storageapi.dev
+S3_REGION=auto
+S3_BUCKET_NAME=your_bucket_name
+S3_ACCESS_KEY_ID=your_access_key_id
+S3_SECRET_ACCESS_KEY=your_secret_access_key
+S3_PUBLIC_BASE_URL=https://your_bucket_name.t3.storageapi.dev
 ```
 
 ---
@@ -137,7 +142,7 @@ docker build -t laporpak-backend .
 Run container:
 
 ```bash
-docker run --env-file .env -p 3000:3000 -v laporpak_uploads:/app/uploads laporpak-backend
+docker run --env-file .env -p 3000:3000 laporpak-backend
 ```
 
 ---
@@ -146,7 +151,7 @@ docker run --env-file .env -p 3000:3000 -v laporpak_uploads:/app/uploads laporpa
 
 ```txt
 src
-|-- config        # Auth, CORS, DB, health, storage, and upload config
+|-- config        # Auth, CORS, DB, health, and upload config
 |-- data          # Static category and Jakarta boundary data
 |-- middleware    # Auth, error handling, and request logging
 |-- routes        # Express route modules

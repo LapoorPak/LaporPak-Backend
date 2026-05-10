@@ -1178,6 +1178,7 @@ export async function createReport(input: CreateReportInput) {
       title: input.title,
       description: input.description,
       imagePaths,
+      imageFiles: input.aiImages,
     });
   } catch (error) {
     console.error("[report-ai] error:", error);
@@ -1405,6 +1406,7 @@ export async function updateReportStatus(input: UpdateReportStatusInput) {
   await assertReportEditableByUser(input.id, input.userId);
   const agencyNote = normalizeOptionalText(input.agencyNote ?? input.resolutionNote);
   const resolutionNote = normalizeOptionalText(input.resolutionNote);
+  const images = normalizeImagePaths(input.images);
 
   if (status === LaporanStatus.clarification_requested && !agencyNote) {
     throw new AppError("Catatan klarifikasi wajib diisi.", 400);
@@ -1422,6 +1424,7 @@ export async function updateReportStatus(input: UpdateReportStatusInput) {
         create: buildTimelineEntry({
           status,
           note: status === LaporanStatus.clarification_requested ? agencyNote : agencyNote ?? resolutionNote,
+          images,
           actorId: input.userId,
           actorRole: "dinas",
         }),

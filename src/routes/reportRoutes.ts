@@ -1,8 +1,8 @@
 import { Router } from "express";
 
-import { UPLOAD_PUBLIC_PATH } from "../config/storage.js";
 import { upload } from "../config/upload.js";
 import { requireAuth, requireAgencyRole, requireCitizenRole } from "../middleware/authMiddleware.js";
+import { uploadFilesToBucket } from "../services/bucketStorageService.js";
 import {
   createReport,
   getReportById,
@@ -66,17 +66,19 @@ function getBodyStringArray(value: unknown) {
   return [trimmed];
 }
 
-function getUploadedImagePaths(files: unknown) {
-  if (!Array.isArray(files)) {
-    return [];
-  }
+function getMulterFiles(files: unknown) {
+  return Array.isArray(files)
+    ? files.filter((file): file is Express.Multer.File => Boolean(file?.buffer))
+    : [];
+}
 
-  return files
-    .filter(
-      (file): file is Express.Multer.File =>
-        Boolean(file) && typeof file === "object" && "filename" in file,
-    )
-    .map((file) => `${UPLOAD_PUBLIC_PATH}/${file.filename}`);
+function buildAiImages(files: Express.Multer.File[], paths: string[]) {
+  return files.map((file, index) => ({
+    path: paths[index],
+    buffer: file.buffer,
+    mimeType: file.mimetype,
+    size: file.size,
+  })).filter((item) => Boolean(item.path));
 }
 
 // GET /api/reports
@@ -164,7 +166,8 @@ router.get("/dashboard", requireAuth, requireAgencyRole, async (req, res, next) 
 router.post("/", requireAuth, requireCitizenRole, upload.array("images", 5), async (req, res, next) => {
   try {
     const bodyImagePaths = getBodyStringArray(req.body.images);
-    const uploadedImagePaths = getUploadedImagePaths(req.files);
+    const uploadedFiles = getMulterFiles(req.files);
+    const uploadedImagePaths = await uploadFilesToBucket(uploadedFiles, "report-images");
     const report = await createReport({
       createdById: req.user.id,
       title: getBodyString(req.body.title),
@@ -174,6 +177,7 @@ router.post("/", requireAuth, requireCitizenRole, upload.array("images", 5), asy
       latitude: getBodyString(req.body.latitude) ?? req.body.latitude,
       longitude: getBodyString(req.body.longitude) ?? req.body.longitude,
       imagePaths: [...uploadedImagePaths, ...bodyImagePaths],
+      aiImages: buildAiImages(uploadedFiles, uploadedImagePaths),
     });
 
     res.status(201).json(buildDataResponse(report));
@@ -194,14 +198,17 @@ router.get("/:id", async (req, res, next) => {
 });
 
 // POST /api/reports/:id/status
-router.post("/:id/status", requireAuth, requireAgencyRole, async (req, res, next) => {
+router.post("/:id/status", requireAuth, requireAgencyRole, upload.array("images", 5), async (req, res, next) => {
   try {
+    const uploadedImagePaths = await uploadFilesToBucket(req.files, "report-updates");
+    const bodyImagePaths = getBodyStringArray(req.body.images);
     const laporan = await updateReportStatus({
       id: String(req.params.id),
       userId: req.user.id,
       status: getBodyString(req.body.status) ?? req.body.status,
       resolutionNote: req.body.resolutionNote,
       agencyNote: getBodyString(req.body.agencyNote) ?? getBodyString(req.body.catatanDinas),
+      images: [...uploadedImagePaths, ...bodyImagePaths],
     });
 
     res.json(buildDataResponse(laporan));
@@ -213,7 +220,7 @@ router.post("/:id/status", requireAuth, requireAgencyRole, async (req, res, next
 // POST /api/reports/:id/resolve
 router.post("/:id/resolve", requireAuth, requireAgencyRole, upload.array("resolutionImages", 5), async (req, res, next) => {
   try {
-    const uploadedResolutionImages = getUploadedImagePaths(req.files);
+    const uploadedResolutionImages = await uploadFilesToBucket(req.files, "resolution-images");
     const bodyResolutionImages = getBodyStringArray(req.body.resolutionImages);
     const laporan = await resolveReport({
       id: String(req.params.id),

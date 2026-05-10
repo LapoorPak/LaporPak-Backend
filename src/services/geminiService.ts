@@ -1,7 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
-import fs from "fs";
 import path from "path";
-import { UPLOAD_DIR } from "../config/storage.js";
 import { REPORT_CATEGORIES } from "../data/reportCategories.js";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
@@ -24,6 +22,9 @@ export function getDinasTypeForCategory(
 }
 
 const MAX_IMAGES = 5;
+const MAX_AI_IMAGE_BYTES = 5 * 1024 * 1024;
+const SUPPORTED_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const DIRECT_IMAGE_URL = /^https?:\/\//i;
 
 function buildPrompt(title: string, description: string): string {
   const categoryList = CATEGORIES.map(
@@ -41,29 +42,42 @@ Respond with ONLY valid JSON (no markdown fencing, no extra text):
 {"categoryCode": "<one of the codes above>", "confidence": <number between 0.0 and 1.0>, "reasoning": "<one sentence explanation in Indonesian>"}`;
 }
 
-function getMimeType(ext: string): string {
+function getMimeType(ext: string): string | null {
   const map: Record<string, string> = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
     ".png": "image/png",
     ".webp": "image/webp",
   };
-  return map[ext.toLowerCase()] || "image/jpeg";
+  return map[ext.toLowerCase()] || null;
 }
 
-function loadImageParts(imagePaths: string[]) {
+async function loadImageParts(imagePaths: string[]) {
   const parts: Array<{ inlineData: { data: string; mimeType: string } }> = [];
 
   for (const imgPath of imagePaths.slice(0, MAX_IMAGES)) {
     try {
-      const filename = path.basename(imgPath);
-      const absPath = path.join(UPLOAD_DIR, filename);
+      if (!DIRECT_IMAGE_URL.test(imgPath)) continue;
 
-      if (!fs.existsSync(absPath)) continue;
+      const response = await fetch(imgPath);
+      if (!response.ok) continue;
 
-      const data = fs.readFileSync(absPath).toString("base64");
-      const ext = path.extname(filename);
-      parts.push({ inlineData: { data, mimeType: getMimeType(ext) } });
+      const contentType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+      const mimeType =
+        contentType && SUPPORTED_IMAGE_MIME_TYPES.has(contentType)
+          ? contentType
+          : getMimeType(path.extname(new URL(imgPath).pathname));
+      if (!mimeType) continue;
+
+      const arrayBuffer = await response.arrayBuffer();
+      if (arrayBuffer.byteLength > MAX_AI_IMAGE_BYTES) continue;
+
+      parts.push({
+        inlineData: {
+          data: Buffer.from(arrayBuffer).toString("base64"),
+          mimeType,
+        },
+      });
     } catch {
       // Skip unreadable images silently
     }
@@ -85,7 +99,7 @@ export async function classifyReport(input: {
 }): Promise<ClassificationResult> {
   const prompt = buildPrompt(input.title, input.description);
   const imageParts = input.imagePaths?.length
-    ? loadImageParts(input.imagePaths)
+    ? await loadImageParts(input.imagePaths)
     : [];
 
   const contents: Array<

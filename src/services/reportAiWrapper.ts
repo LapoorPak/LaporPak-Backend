@@ -1,8 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
-import fs from "fs";
 import path from "path";
 
-import { UPLOAD_DIR, UPLOAD_PUBLIC_PATH } from "../config/storage.js";
 import { REPORT_CATEGORIES } from "../data/reportCategories.js";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
@@ -13,7 +11,7 @@ const CATEGORY_DINAS_MAP = new Map(
 const MAX_IMAGES = 5;
 const MAX_AI_IMAGE_BYTES = 5 * 1024 * 1024;
 const SUPPORTED_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
-const LOCAL_UPLOAD_PREFIX = `${UPLOAD_PUBLIC_PATH}/`;
+const DIRECT_IMAGE_URL = /^https?:\/\//i;
 
 type GeminiContentPart =
   | { text: string }
@@ -37,6 +35,13 @@ export interface ReportAnalysisResult {
   reasoning: string;
   acceptedImagePaths: string[];
   ignoredImagePaths: string[];
+}
+
+export interface ReportAiImage {
+  path: string;
+  buffer: Buffer;
+  mimeType: string;
+  size: number;
 }
 
 export function getDinasTypeForCategory(categoryCode: string): string | undefined {
@@ -99,13 +104,12 @@ function getSupportedMimeTypeFromPath(filePath: string) {
 }
 
 function isAcceptedImagePath(imagePath: string) {
-  return imagePath.startsWith(LOCAL_UPLOAD_PREFIX);
+  return DIRECT_IMAGE_URL.test(imagePath);
 }
 
 function sanitizeReportImagePaths(imagePaths?: string[]) {
   const accepted: string[] = [];
   const ignored: string[] = [];
-  const localUploadPaths: string[] = [];
 
   for (const imagePath of imagePaths ?? []) {
     if (typeof imagePath !== "string") {
@@ -122,54 +126,85 @@ function sanitizeReportImagePaths(imagePaths?: string[]) {
       continue;
     }
 
-    if (trimmed.startsWith(LOCAL_UPLOAD_PREFIX) && !getSupportedMimeTypeFromPath(trimmed)) {
-      ignored.push(trimmed);
-      continue;
-    }
-
     accepted.push(trimmed);
-
-    if (trimmed.startsWith(LOCAL_UPLOAD_PREFIX)) {
-      localUploadPaths.push(trimmed);
-    }
   }
 
   return {
     accepted,
     ignored,
-    localUploadPaths,
+    localUploadPaths: [],
   };
 }
 
-async function loadImageParts(imagePaths: string[]) {
+function loadBufferedImageParts(images: ReportAiImage[] = []) {
   const parts: Array<{ inlineData: { data: string; mimeType: string } }> = [];
   const loadedImagePaths: string[] = [];
-  const ignoredImagePaths: string[] = imagePaths.slice(MAX_IMAGES);
+  const ignoredImagePaths: string[] = images.slice(MAX_IMAGES).map((image) => image.path);
 
-  for (const imgPath of imagePaths.slice(0, MAX_IMAGES)) {
+  for (const image of images.slice(0, MAX_IMAGES)) {
+    if (!image.path || !SUPPORTED_IMAGE_MIME_TYPES.has(image.mimeType) || image.size > MAX_AI_IMAGE_BYTES) {
+      ignoredImagePaths.push(image.path);
+      continue;
+    }
+
+    parts.push({
+      inlineData: {
+        data: image.buffer.toString("base64"),
+        mimeType: image.mimeType,
+      },
+    });
+    loadedImagePaths.push(image.path);
+  }
+
+  return {
+    parts,
+    loadedImagePaths,
+    ignoredImagePaths,
+  };
+}
+
+async function loadImageParts(imagePaths: string[], bufferedImages: ReportAiImage[] = []) {
+  const buffered = loadBufferedImageParts(bufferedImages);
+  const remainingSlots = Math.max(0, MAX_IMAGES - buffered.parts.length);
+  const pathsLoadedFromBuffer = new Set(buffered.loadedImagePaths);
+  const parts: Array<{ inlineData: { data: string; mimeType: string } }> = [];
+  const loadedImagePaths: string[] = [];
+  const fetchCandidates = imagePaths.filter((imagePath) => !pathsLoadedFromBuffer.has(imagePath));
+  const ignoredImagePaths: string[] = [
+    ...buffered.ignoredImagePaths,
+    ...fetchCandidates.slice(remainingSlots),
+  ];
+
+  for (const imgPath of fetchCandidates.slice(0, remainingSlots)) {
     try {
-      const filename = path.basename(imgPath);
-      const absPath = path.join(UPLOAD_DIR, filename);
-
-      if (!fs.existsSync(absPath)) {
+      const response = await fetch(imgPath);
+      if (!response.ok) {
         ignoredImagePaths.push(imgPath);
         continue;
       }
 
-      const stat = fs.statSync(absPath);
-      if (stat.size > MAX_AI_IMAGE_BYTES) {
-        ignoredImagePaths.push(imgPath);
-        continue;
-      }
-
-      const data = fs.readFileSync(absPath).toString("base64");
-      const mimeType = getSupportedMimeTypeFromPath(filename);
+      const contentType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+      const mimeType =
+        contentType && SUPPORTED_IMAGE_MIME_TYPES.has(contentType)
+          ? contentType
+          : getSupportedMimeTypeFromPath(new URL(imgPath).pathname);
       if (!mimeType) {
         ignoredImagePaths.push(imgPath);
         continue;
       }
 
-      parts.push({ inlineData: { data, mimeType } });
+      const arrayBuffer = await response.arrayBuffer();
+      if (arrayBuffer.byteLength > MAX_AI_IMAGE_BYTES) {
+        ignoredImagePaths.push(imgPath);
+        continue;
+      }
+
+      parts.push({
+        inlineData: {
+          data: Buffer.from(arrayBuffer).toString("base64"),
+          mimeType,
+        },
+      });
       loadedImagePaths.push(imgPath);
     } catch {
       ignoredImagePaths.push(imgPath);
@@ -177,8 +212,8 @@ async function loadImageParts(imagePaths: string[]) {
   }
 
   return {
-    parts,
-    loadedImagePaths,
+    parts: [...buffered.parts, ...parts],
+    loadedImagePaths: [...buffered.loadedImagePaths, ...loadedImagePaths],
     ignoredImagePaths,
   };
 }
@@ -261,16 +296,15 @@ export async function analyzeReportSubmission(input: {
   title: string;
   description: string;
   imagePaths?: string[];
+  imageFiles?: ReportAiImage[];
 }): Promise<ReportAnalysisResult> {
   const sanitizedImages = sanitizeReportImagePaths(input.imagePaths);
-  const loadedImages = await loadImageParts(sanitizedImages.accepted);
+  const loadedImages = await loadImageParts(sanitizedImages.accepted, input.imageFiles);
   const resultImages = {
     ...sanitizedImages,
     accepted: loadedImages.loadedImagePaths,
     ignored: [...sanitizedImages.ignored, ...loadedImages.ignoredImagePaths],
-    localUploadPaths: loadedImages.loadedImagePaths.filter((imagePath) =>
-      imagePath.startsWith(LOCAL_UPLOAD_PREFIX),
-    ),
+    localUploadPaths: [],
   };
 
   if (loadedImages.parts.length === 0) {

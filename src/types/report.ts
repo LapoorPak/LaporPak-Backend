@@ -54,6 +54,12 @@ export interface CreateReportInput {
   latitude: unknown;
   longitude: unknown;
   imagePaths: string[];
+  aiImages?: {
+    path: string;
+    buffer: Buffer;
+    mimeType: string;
+    size: number;
+  }[];
 }
 
 export interface UpdateReportStatusInput {
@@ -62,6 +68,7 @@ export interface UpdateReportStatusInput {
   status?: string;
   resolutionNote?: unknown;
   agencyNote?: unknown;
+  images?: string[];
 }
 
 export interface ResolveReportInput {
