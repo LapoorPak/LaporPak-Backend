@@ -99,6 +99,20 @@ export function officerStatusNotification(
   return { ...map[status], laporanId };
 }
 
+export function citizenClarificationNotification(
+  laporanTitle: string,
+  laporanId: string,
+  citizenName?: string | null,
+): NotificationData {
+  return {
+    type: "info",
+    title: "Klarifikasi Warga Masuk",
+    tag: "Klarifikasi",
+    message: `${citizenName || "Warga"} telah mengirim klarifikasi untuk laporan "${laporanTitle}".`,
+    laporanId,
+  };
+}
+
 // Notification for citizens when their report status changes
 export function citizenStatusNotification(
   status: string,

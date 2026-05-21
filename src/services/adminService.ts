@@ -10,6 +10,61 @@ import type {
   ListAdminUsersInput,
 } from "../types/admin.js";
 
+type ReportVoteSummary = {
+  upvotes: number;
+  downvotes: number;
+  voteScore: number;
+};
+
+function emptyReportVoteSummary(): ReportVoteSummary {
+  return {
+    upvotes: 0,
+    downvotes: 0,
+    voteScore: 0,
+  };
+}
+
+async function getAdminReportVoteSummaries(laporanIds: string[]) {
+  const uniqueIds = [...new Set(laporanIds)].filter(Boolean);
+  const voteMap = new Map<string, ReportVoteSummary>();
+
+  for (const id of uniqueIds) {
+    voteMap.set(id, emptyReportVoteSummary());
+  }
+
+  if (uniqueIds.length === 0) {
+    return voteMap;
+  }
+
+  const voteGroups = await prisma.laporanVote.groupBy({
+    by: ["laporanId", "value"],
+    where: { laporanId: { in: uniqueIds } },
+    _count: { _all: true },
+  });
+
+  for (const group of voteGroups) {
+    const summary = voteMap.get(group.laporanId) ?? emptyReportVoteSummary();
+
+    if (group.value > 0) {
+      summary.upvotes += group._count._all;
+    } else if (group.value < 0) {
+      summary.downvotes += group._count._all;
+    }
+
+    summary.voteScore = summary.upvotes - summary.downvotes;
+    voteMap.set(group.laporanId, summary);
+  }
+
+  return voteMap;
+}
+
+function withReportVoteSummary<T extends { id: string }>(report: T, voteMap: Map<string, ReportVoteSummary>) {
+  return {
+    ...report,
+    ...(voteMap.get(report.id) ?? emptyReportVoteSummary()),
+  };
+}
+
 export async function getAdminOverview() {
   const [
     totalDinas,
@@ -762,7 +817,12 @@ export async function listAdminLaporan(input: {
     prisma.laporan.count({ where }),
   ]);
 
-  return { data, total };
+  const voteMap = await getAdminReportVoteSummaries(data.map((laporan) => laporan.id));
+
+  return {
+    data: data.map((laporan) => withReportVoteSummary(laporan, voteMap)),
+    total,
+  };
 }
 
 export async function getAdminLaporanDetail(id: string) {
@@ -781,7 +841,8 @@ export async function getAdminLaporanDetail(id: string) {
     throw new AppError("Laporan tidak ditemukan", 404);
   }
 
-  return laporan;
+  const voteMap = await getAdminReportVoteSummaries([laporan.id]);
+  return withReportVoteSummary(laporan, voteMap);
 }
 
 export async function adminUpdateLaporanStatus(input: {
@@ -796,12 +857,12 @@ export async function adminUpdateLaporanStatus(input: {
     throw new AppError("Laporan tidak ditemukan", 404);
   }
 
-  const validStatuses = ["pending", "verified", "in_progress", "resolved", "rejected"];
+  const validStatuses = ["pending", "verified", "in_progress", "clarification_requested", "resolved", "rejected"];
   if (!validStatuses.includes(input.status)) {
     throw new AppError(`Status tidak valid. Harus salah satu dari: ${validStatuses.join(", ")}`, 400);
   }
 
-  return prisma.laporan.update({
+  const updated = await prisma.laporan.update({
     where: { id: input.id },
     data: {
       status: input.status as LaporanStatus,
@@ -816,6 +877,8 @@ export async function adminUpdateLaporanStatus(input: {
       createdBy: { select: { id: true, name: true, email: true, image: true } },
     },
   });
+  const voteMap = await getAdminReportVoteSummaries([updated.id]);
+  return withReportVoteSummary(updated, voteMap);
 }
 
 export async function adminAssignLaporan(id: string, cabangDinasId: string) {
@@ -832,7 +895,7 @@ export async function adminAssignLaporan(id: string, cabangDinasId: string) {
     throw new AppError("Cabang dinas tidak ditemukan", 404);
   }
 
-  return prisma.laporan.update({
+  const updated = await prisma.laporan.update({
     where: { id },
     data: {
       cabangDinasId,
@@ -845,6 +908,8 @@ export async function adminAssignLaporan(id: string, cabangDinasId: string) {
       createdBy: { select: { id: true, name: true, email: true, image: true } },
     },
   });
+  const voteMap = await getAdminReportVoteSummaries([updated.id]);
+  return withReportVoteSummary(updated, voteMap);
 }
 
 export async function adminDeleteLaporan(id: string) {

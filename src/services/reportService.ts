@@ -3,6 +3,7 @@ import { LaporanStatus, Prisma } from "../generated/prisma/client.js";
 import { AppError } from "../middleware/authMiddleware.js";
 import {
   aiRejectedReportNotification,
+  citizenClarificationNotification,
   citizenStatusNotification,
   newReportNotification,
   notifyCabangOfficers,
@@ -18,9 +19,12 @@ import type {
   ListMyReportsInput,
   ListReportLocationsInput,
   ListReportsInput,
+  RateReportInput,
   ResolveReportInput,
   ResolvedKategori,
+  SubmitReportClarificationInput,
   UpdateReportStatusInput,
+  VoteReportInput,
 } from "../types/report.js";
 
 const VALID_STATUSES = Object.values(LaporanStatus);
@@ -128,6 +132,69 @@ function normalizeImagePaths(value: unknown) {
   return Array.isArray(value)
     ? value.filter((image): image is string => typeof image === "string" && image.trim().length > 0)
     : [];
+}
+
+function maskCitizenName(name?: string | null) {
+  const trimmed = name?.trim();
+  if (!trimmed) {
+    return "Warga";
+  }
+
+  return trimmed
+    .split(/\s+/)
+    .map((part) => {
+      if (part.length <= 2) {
+        return `${part[0] ?? ""}${"*".repeat(Math.max(part.length - 1, 0))}`;
+      }
+
+      const middleLength = Math.max(1, part.length - 3);
+      return `${part.slice(0, 1)}${"*".repeat(middleLength)}${part.slice(-2)}`;
+    })
+    .join(" ");
+}
+
+function shouldMaskReporterName(viewer?: { role?: string }) {
+  return !viewer?.role || viewer.role === "warga";
+}
+
+function buildReporterPayload<T extends { id: string; name: string; image?: string | null }>(
+  user: T | null | undefined,
+  viewer?: { role?: string },
+) {
+  if (!user) {
+    return null;
+  }
+
+  return {
+    ...user,
+    name: shouldMaskReporterName(viewer) ? maskCitizenName(user.name) : user.name,
+  };
+}
+
+function normalizeVoteValue(value: unknown) {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (raw == null || raw === "" || raw === 0 || raw === "0" || raw === null) {
+    return 0;
+  }
+
+  if (raw === "up" || raw === "upvote" || raw === "1" || raw === 1) {
+    return 1;
+  }
+
+  if (raw === "down" || raw === "downvote" || raw === "-1" || raw === -1) {
+    return -1;
+  }
+
+  throw new AppError("Vote harus bernilai 1, -1, atau 0.", 400);
+}
+
+function normalizeRatingScore(value: unknown) {
+  const score = Number(Array.isArray(value) ? value[0] : value);
+  if (!Number.isInteger(score) || score < 1 || score > 5) {
+    throw new AppError("Rating harus berupa angka 1 sampai 5.", 400);
+  }
+
+  return score;
 }
 
 function buildTimelineEntry(input: {
@@ -316,6 +383,112 @@ async function getReportStats(where: Prisma.LaporanWhereInput) {
       total: entry._count._all,
     })),
   };
+}
+
+type ReportFeedback = {
+  upvotes: number;
+  downvotes: number;
+  voteScore: number;
+  myVote: number | null;
+  rating: {
+    id: string;
+    score: number;
+    note: string | null;
+    userId: string;
+    dinasId: string | null;
+    cabangDinasId: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+  } | null;
+};
+
+function emptyReportFeedback(): ReportFeedback {
+  return {
+    upvotes: 0,
+    downvotes: 0,
+    voteScore: 0,
+    myVote: null,
+    rating: null,
+  };
+}
+
+async function getReportFeedbackByIds(laporanIds: string[], userId?: string | null) {
+  const uniqueIds = [...new Set(laporanIds)].filter(Boolean);
+  const feedbackMap = new Map<string, ReportFeedback>();
+
+  for (const id of uniqueIds) {
+    feedbackMap.set(id, emptyReportFeedback());
+  }
+
+  if (uniqueIds.length === 0) {
+    return feedbackMap;
+  }
+
+  const [voteGroups, myVotes, ratings] = await Promise.all([
+    prisma.laporanVote.groupBy({
+      by: ["laporanId", "value"],
+      where: { laporanId: { in: uniqueIds } },
+      _count: { _all: true },
+    }),
+    userId
+      ? prisma.laporanVote.findMany({
+          where: { laporanId: { in: uniqueIds }, userId },
+          select: { laporanId: true, value: true },
+        })
+      : Promise.resolve([]),
+    prisma.laporanRating.findMany({
+      where: { laporanId: { in: uniqueIds } },
+      select: {
+        laporanId: true,
+        id: true,
+        score: true,
+        note: true,
+        userId: true,
+        dinasId: true,
+        cabangDinasId: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    }),
+  ]);
+
+  for (const group of voteGroups) {
+    const feedback = feedbackMap.get(group.laporanId) ?? emptyReportFeedback();
+    if (group.value > 0) {
+      feedback.upvotes += group._count._all;
+    } else if (group.value < 0) {
+      feedback.downvotes += group._count._all;
+    }
+    feedback.voteScore = feedback.upvotes - feedback.downvotes;
+    feedbackMap.set(group.laporanId, feedback);
+  }
+
+  for (const vote of myVotes) {
+    const feedback = feedbackMap.get(vote.laporanId) ?? emptyReportFeedback();
+    feedback.myVote = vote.value;
+    feedbackMap.set(vote.laporanId, feedback);
+  }
+
+  for (const rating of ratings) {
+    const feedback = feedbackMap.get(rating.laporanId) ?? emptyReportFeedback();
+    feedback.rating = {
+      id: rating.id,
+      score: rating.score,
+      note: rating.note,
+      userId: rating.userId,
+      dinasId: rating.dinasId,
+      cabangDinasId: rating.cabangDinasId,
+      createdAt: rating.createdAt,
+      updatedAt: rating.updatedAt,
+    };
+    feedbackMap.set(rating.laporanId, feedback);
+  }
+
+  return feedbackMap;
+}
+
+function getReportFeedback(feedbackMap: Map<string, ReportFeedback>, laporanId: string) {
+  return feedbackMap.get(laporanId) ?? emptyReportFeedback();
 }
 
 function combineReportWhere(
@@ -693,103 +866,191 @@ function buildReportLocationWhere(input: {
 
 async function getReportLocationPayload(
   where: Prisma.LaporanWhereInput,
-  viewer?: { role?: string; dinasId?: string | null },
+  viewer?: { role?: string; dinasId?: string | null; userId?: string | null },
+  options?: { pagination?: { skip: number; take: number }; sort?: string },
 ) {
-  const [reports, total, stats] = await Promise.all([
-    prisma.laporan.findMany({
-      where,
+  const reportLocationSelect = {
+    id: true,
+    title: true,
+    agencyNote: true,
+    resolutionNote: true,
+    resolutionImages: true,
+    images: true,
+    latitude: true,
+    longitude: true,
+    status: true,
+    routingStatus: true,
+    aiDecisionStatus: true,
+    aiRejectionCode: true,
+    aiSuggestedRewrite: true,
+    aiClarityScore: true,
+    aiSeriousnessScore: true,
+    aiUrgencyScore: true,
+    aiConfidence: true,
+    aiReasoning: true,
+    createdAt: true,
+    updatedAt: true,
+    createdBy: { select: { id: true, name: true } },
+    kategori: {
       select: {
         id: true,
-        title: true,
-        agencyNote: true,
-        resolutionNote: true,
-        resolutionImages: true,
-        images: true,
-        latitude: true,
-        longitude: true,
-        status: true,
-        routingStatus: true,
-        aiDecisionStatus: true,
-        aiRejectionCode: true,
-        aiSuggestedRewrite: true,
-        aiClarityScore: true,
-        aiSeriousnessScore: true,
-        aiUrgencyScore: true,
-        aiConfidence: true,
-        aiReasoning: true,
-        createdAt: true,
-        updatedAt: true,
-        createdBy: { select: { id: true, name: true } },
-        kategori: {
+        code: true,
+        name: true,
+        dinas: {
           select: {
             id: true,
             code: true,
+            type: true,
             name: true,
-            dinas: {
-              select: {
-                id: true,
-                code: true,
-                type: true,
-                name: true,
-              },
-            },
-          },
-        },
-        cabangDinas: {
-          select: {
-            id: true,
-            name: true,
-            wilayah: true,
-          },
-        },
-        timeline: {
-          orderBy: { createdAt: "asc" },
-          select: {
-            id: true,
-            status: true,
-            note: true,
-            images: true,
-            actorRole: true,
-            createdAt: true,
           },
         },
       },
+    },
+    cabangDinas: {
+      select: {
+        id: true,
+        name: true,
+        wilayah: true,
+      },
+    },
+    timeline: {
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        status: true,
+        note: true,
+        images: true,
+        actorRole: true,
+        createdAt: true,
+      },
+    },
+  } satisfies Prisma.LaporanSelect;
+
+  if (options?.sort === "top") {
+    const [candidates, total, stats] = await Promise.all([
+      prisma.laporan.findMany({
+        where,
+        select: { id: true, createdAt: true },
+      }),
+      prisma.laporan.count({ where }),
+      getReportStats(where),
+    ]);
+    const feedbackMap = await getReportFeedbackByIds(
+      candidates.map((report) => report.id),
+      viewer?.userId,
+    );
+    const sortedIds = candidates
+      .sort((a, b) => {
+        const aFeedback = getReportFeedback(feedbackMap, a.id);
+        const bFeedback = getReportFeedback(feedbackMap, b.id);
+
+        return (
+          bFeedback.voteScore - aFeedback.voteScore ||
+          bFeedback.upvotes - aFeedback.upvotes ||
+          b.createdAt.getTime() - a.createdAt.getTime()
+        );
+      })
+      .map((report) => report.id);
+    const pagedIds = options.pagination
+      ? sortedIds.slice(options.pagination.skip, options.pagination.skip + options.pagination.take)
+      : sortedIds;
+    const pageReports = pagedIds.length > 0
+      ? await prisma.laporan.findMany({
+          where: { id: { in: pagedIds } },
+          select: reportLocationSelect,
+        })
+      : [];
+    const reportById = new Map(pageReports.map((report) => [report.id, report]));
+    const reports = pagedIds
+      .map((id) => reportById.get(id))
+      .filter((report): report is NonNullable<typeof report> => Boolean(report));
+
+    return {
+      data: reports.map((report) => {
+        const feedback = getReportFeedback(feedbackMap, report.id);
+        const isOwnCitizenReport = Boolean(viewer?.userId && report.createdBy?.id === viewer.userId);
+        const isScopedAgencyReport =
+          viewer?.role === "admin" ||
+          Boolean(viewer?.dinasId && report.kategori?.dinas?.id === viewer.dinasId);
+
+        return {
+          id: report.id,
+          title: report.title,
+          agencyNote: report.agencyNote,
+          resolutionNote: report.resolutionNote ?? null,
+          resolutionImages: report.resolutionImages ?? [],
+          images: report.images ?? [],
+          lat: report.latitude,
+          lng: report.longitude,
+          status: report.status,
+          routingStatus: report.routingStatus,
+          urgencyScore: report.aiUrgencyScore,
+          createdAt: report.createdAt,
+          updatedAt: report.updatedAt,
+          createdBy: buildReporterPayload(report.createdBy, viewer),
+          kategori: report.kategori,
+          dinas: report.kategori?.dinas ?? null,
+          cabangDinas: report.cabangDinas,
+          canEdit: isOwnCitizenReport || isScopedAgencyReport,
+          ownership: isOwnCitizenReport || isScopedAgencyReport ? "mine" : "other",
+          timeline: buildTimelinePayload(report.timeline),
+          aiReview: buildPersistedAiReview(report),
+          ...feedback,
+        };
+      }),
+      total,
+      stats,
+    };
+  }
+
+  const [reports, total, stats] = await Promise.all([
+    prisma.laporan.findMany({
+      where,
+      select: reportLocationSelect,
       orderBy: { createdAt: "desc" },
+      ...(options?.pagination ? { skip: options.pagination.skip, take: options.pagination.take } : {}),
     }),
     prisma.laporan.count({ where }),
     getReportStats(where),
   ]);
+  const feedbackMap = await getReportFeedbackByIds(
+    reports.map((report) => report.id),
+    viewer?.userId,
+  );
 
   return {
-    data: reports.map((report) => ({
-      id: report.id,
-      title: report.title,
-      agencyNote: report.agencyNote,
-      resolutionNote: report.resolutionNote ?? null,
-      resolutionImages: report.resolutionImages ?? [],
-      images: report.images ?? [],
-      lat: report.latitude,
-      lng: report.longitude,
-      status: report.status,
-      routingStatus: report.routingStatus,
-      urgencyScore: report.aiUrgencyScore,
-      createdAt: report.createdAt,
-      updatedAt: report.updatedAt,
-      createdBy: report.createdBy ?? null,
-      kategori: report.kategori,
-      dinas: report.kategori?.dinas ?? null,
-      cabangDinas: report.cabangDinas,
-      canEdit:
+    data: reports.map((report) => {
+      const feedback = getReportFeedback(feedbackMap, report.id);
+      const isOwnCitizenReport = Boolean(viewer?.userId && report.createdBy?.id === viewer.userId);
+      const isScopedAgencyReport =
         viewer?.role === "admin" ||
-        Boolean(viewer?.dinasId && report.kategori?.dinas?.id === viewer.dinasId),
-      ownership:
-        viewer?.role === "admin" ||
-        Boolean(viewer?.dinasId && report.kategori?.dinas?.id === viewer.dinasId)
-          ? "mine"
-          : "other",
-      timeline: buildTimelinePayload(report.timeline),
-      aiReview: buildPersistedAiReview(report),
-    })),
+        Boolean(viewer?.dinasId && report.kategori?.dinas?.id === viewer.dinasId);
+
+      return {
+        id: report.id,
+        title: report.title,
+        agencyNote: report.agencyNote,
+        resolutionNote: report.resolutionNote ?? null,
+        resolutionImages: report.resolutionImages ?? [],
+        images: report.images ?? [],
+        lat: report.latitude,
+        lng: report.longitude,
+        status: report.status,
+        routingStatus: report.routingStatus,
+        urgencyScore: report.aiUrgencyScore,
+        createdAt: report.createdAt,
+        updatedAt: report.updatedAt,
+        createdBy: buildReporterPayload(report.createdBy, viewer),
+        kategori: report.kategori,
+        dinas: report.kategori?.dinas ?? null,
+        cabangDinas: report.cabangDinas,
+        canEdit: isOwnCitizenReport || isScopedAgencyReport,
+        ownership: isOwnCitizenReport || isScopedAgencyReport ? "mine" : "other",
+        timeline: buildTimelinePayload(report.timeline),
+        aiReview: buildPersistedAiReview(report),
+        ...feedback,
+      };
+    }),
     total,
     stats,
   };
@@ -942,12 +1203,15 @@ export async function listReports(input: ListReportsInput) {
     prisma.laporan.count({ where }),
     getReportStats(where),
   ]);
+  const feedbackMap = await getReportFeedbackByIds(laporan.map((item) => item.id));
 
   return {
     data: laporan.map((item) => ({
       ...item,
+      createdBy: buildReporterPayload(item.createdBy),
       timeline: buildTimelinePayload(item.timeline),
       aiReview: buildPersistedAiReview(item),
+      ...getReportFeedback(feedbackMap, item.id),
     })),
     total,
     stats,
@@ -978,12 +1242,17 @@ export async function listMyReports(input: ListMyReportsInput) {
     prisma.laporan.count({ where }),
     getReportStats(where),
   ]);
+  const feedbackMap = await getReportFeedbackByIds(
+    laporan.map((item) => item.id),
+    input.userId,
+  );
 
   return {
     data: laporan.map((item) => ({
       ...item,
       timeline: buildTimelinePayload(item.timeline),
       aiReview: buildPersistedAiReview(item),
+      ...getReportFeedback(feedbackMap, item.id),
     })),
     total,
     stats,
@@ -1028,7 +1297,14 @@ export async function listReportLocations(input: ListReportLocationsInput) {
     excludeRejected: true,
   });
 
-  return getReportLocationPayload(where, { role: input.role, dinasId: viewerDinasId });
+  return getReportLocationPayload(where, {
+    role: input.role,
+    dinasId: viewerDinasId,
+    userId: input.userId,
+  }, {
+    pagination: input.pagination,
+    sort: input.sort,
+  });
 }
 
 export async function getReportDashboard(input: GetReportDashboardInput) {
@@ -1389,11 +1665,14 @@ export async function getReportById(id: string) {
   if (!laporan) {
     throw new AppError("Report not found", 404);
   }
+  const feedbackMap = await getReportFeedbackByIds([laporan.id]);
 
   return {
     ...laporan,
+    createdBy: buildReporterPayload(laporan.createdBy),
     timeline: buildTimelinePayload(laporan.timeline),
     aiReview: buildPersistedAiReview(laporan),
+    ...getReportFeedback(feedbackMap, laporan.id),
   };
 }
 
@@ -1451,6 +1730,149 @@ export async function updateReportStatus(input: UpdateReportStatusInput) {
     timeline: buildTimelinePayload(laporan.timeline),
     aiReview: buildPersistedAiReview(laporan),
   };
+}
+
+export async function submitReportClarification(input: SubmitReportClarificationInput) {
+  const note = normalizeOptionalText(input.note);
+  const images = normalizeImagePaths(input.images);
+
+  if (!note) {
+    throw new AppError("Balasan klarifikasi wajib diisi.", 400);
+  }
+
+  const existing = await prisma.laporan.findUnique({
+    where: { id: input.id },
+    include: {
+      createdBy: { select: { id: true, name: true } },
+      kategori: { include: { dinas: true } },
+      cabangDinas: true,
+    },
+  });
+
+  if (!existing) {
+    throw new AppError("Report not found", 404);
+  }
+
+  if (existing.createdById !== input.userId) {
+    throw new AppError("Forbidden", 403);
+  }
+
+  if (existing.status !== LaporanStatus.clarification_requested) {
+    throw new AppError("Laporan ini tidak sedang membutuhkan klarifikasi.", 400);
+  }
+
+  const laporan = await prisma.laporan.update({
+    where: { id: input.id },
+    data: {
+      status: LaporanStatus.in_progress,
+      timeline: {
+        create: buildTimelineEntry({
+          status: LaporanStatus.in_progress,
+          note,
+          images,
+          actorId: input.userId,
+          actorRole: "warga",
+        }),
+      },
+    },
+    include: reportDetailInclude,
+  });
+
+  if (existing.cabangDinasId) {
+    notifyCabangOfficers(
+      existing.cabangDinasId,
+      citizenClarificationNotification(existing.title, existing.id, existing.createdBy.name),
+    ).catch((error) => console.error("[notification] cabang clarification notify failed:", error));
+  }
+
+  const feedbackMap = await getReportFeedbackByIds([laporan.id], input.userId);
+
+  return {
+    ...laporan,
+    timeline: buildTimelinePayload(laporan.timeline),
+    aiReview: buildPersistedAiReview(laporan),
+    ...getReportFeedback(feedbackMap, laporan.id),
+  };
+}
+
+export async function voteReport(input: VoteReportInput) {
+  const vote = normalizeVoteValue(input.vote);
+  const laporan = await getReportOrThrow(input.id);
+
+  if (laporan.status === LaporanStatus.rejected) {
+    throw new AppError("Laporan yang ditolak tidak dapat divote.", 400);
+  }
+
+  if (vote === 0) {
+    await prisma.laporanVote.deleteMany({
+      where: { laporanId: input.id, userId: input.userId },
+    });
+  } else {
+    await prisma.laporanVote.upsert({
+      where: {
+        laporanId_userId: {
+          laporanId: input.id,
+          userId: input.userId,
+        },
+      },
+      create: {
+        laporanId: input.id,
+        userId: input.userId,
+        value: vote,
+      },
+      update: { value: vote },
+    });
+  }
+
+  const feedbackMap = await getReportFeedbackByIds([input.id], input.userId);
+
+  return {
+    id: input.id,
+    ...getReportFeedback(feedbackMap, input.id),
+  };
+}
+
+export async function rateReport(input: RateReportInput) {
+  const score = normalizeRatingScore(input.score);
+  const note = normalizeOptionalText(input.note);
+  const laporan = await prisma.laporan.findUnique({
+    where: { id: input.id },
+    include: {
+      kategori: { include: { dinas: true } },
+    },
+  });
+
+  if (!laporan) {
+    throw new AppError("Report not found", 404);
+  }
+
+  if (laporan.createdById !== input.userId) {
+    throw new AppError("Hanya pelapor yang bisa memberi rating.", 403);
+  }
+
+  if (laporan.status !== LaporanStatus.resolved) {
+    throw new AppError("Rating hanya bisa diberikan setelah laporan selesai.", 400);
+  }
+
+  const rating = await prisma.laporanRating.upsert({
+    where: { laporanId: input.id },
+    create: {
+      laporanId: input.id,
+      userId: input.userId,
+      dinasId: laporan.kategori?.dinasId ?? null,
+      cabangDinasId: laporan.cabangDinasId ?? null,
+      score,
+      note,
+    },
+    update: {
+      score,
+      note,
+      dinasId: laporan.kategori?.dinasId ?? null,
+      cabangDinasId: laporan.cabangDinasId ?? null,
+    },
+  });
+
+  return { id: input.id, rating };
 }
 
 export async function resolveReport(input: ResolveReportInput) {

@@ -50,6 +50,8 @@ model User {
   createdReports  Laporan[]      @relation("ReportCreator")
   assignedReports Laporan[]      @relation("ReportAssignee")
   resolvedReports Laporan[]      @relation("ReportResolver")
+  reportVotes     LaporanVote[]
+  reportRatings   LaporanRating[]
   petugas         PetugasDinas?
   notifications   Notification[]
 
@@ -113,6 +115,7 @@ model Dinas {
 
   kategori         KategoriLaporan[]
   cabang           CabangDinas[]
+  ratings          LaporanRating[]
   routingDecisions LaporanRoutingDecision[]
 
   @@index([type, wilayah])
@@ -141,6 +144,7 @@ model CabangDinas {
 
   petugas          PetugasDinas[]
   laporan          Laporan[]
+  ratings          LaporanRating[]
   routingDecisions LaporanRoutingDecision[]
 
   @@index([dinasId, wilayah])
@@ -211,6 +215,8 @@ model Laporan {
   notifications   Notification[]
   routingDecisions LaporanRoutingDecision[]
   timeline         LaporanTimeline[]
+  votes            LaporanVote[]
+  rating           LaporanRating?
 
   @@index([createdById])
   @@index([kategoriId, status])
@@ -218,6 +224,44 @@ model Laporan {
   @@index([routingStatus, createdAt])
   @@index([latitude, longitude])
   @@map("laporan")
+}
+
+model LaporanVote {
+  id        String   @id @default(cuid())
+  laporanId String
+  userId    String
+  value     Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  laporan Laporan @relation(fields: [laporanId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([laporanId, userId])
+  @@index([userId])
+  @@map("laporan_vote")
+}
+
+model LaporanRating {
+  id            String   @id @default(cuid())
+  laporanId     String   @unique
+  userId        String
+  dinasId       String?
+  cabangDinasId String?
+  score         Int
+  note          String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  laporan     Laporan      @relation(fields: [laporanId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dinas       Dinas?       @relation(fields: [dinasId], references: [id], onDelete: SetNull)
+  cabangDinas CabangDinas? @relation(fields: [cabangDinasId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([dinasId])
+  @@index([cabangDinasId])
+  @@map("laporan_rating")
 }
 
 model LaporanTimeline {

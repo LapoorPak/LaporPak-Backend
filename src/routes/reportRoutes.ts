@@ -10,8 +10,11 @@ import {
   listMyReports,
   listReportLocations,
   listReports,
+  rateReport,
   resolveReport,
+  submitReportClarification,
   updateReportStatus,
+  voteReport,
 } from "../services/reportService.js";
 import { buildDataResponse, buildListResponse, parsePagination } from "../utils/apiResponse.js";
 
@@ -119,20 +122,30 @@ router.get("/me", requireAuth, async (req, res, next) => {
 // GET /api/reports/locations
 router.get("/locations", requireAuth, async (req, res, next) => {
   try {
+    const hasPagination = req.query.page != null || req.query.limit != null || req.query.take != null;
+    const pagination = hasPagination ? parsePagination(req.query, { defaultLimit: 5, maxLimit: 100 }) : undefined;
     const payload = await listReportLocations({
       userId: req.user.id,
       role: req.user.role,
+      pagination,
       scope: getStringQuery(req.query.scope) === "all" ? "all" : getStringQuery(req.query.scope) === "mine" ? "mine" : undefined,
       status: getStringQuery(req.query.status),
       kategoriId: getStringQuery(req.query.kategoriId),
       dinasId: getStringQuery(req.query.dinasId),
       cabangDinasId: getStringQuery(req.query.cabangDinasId),
       createdById: getStringQuery(req.query.createdById),
+      search: getStringQuery(req.query.search),
+      sort: getStringQuery(req.query.sort),
       minLat: getNumberQuery(req.query.minLat),
       maxLat: getNumberQuery(req.query.maxLat),
       minLng: getNumberQuery(req.query.minLng),
       maxLng: getNumberQuery(req.query.maxLng),
     });
+
+    if (pagination) {
+      res.json(buildListResponse(payload.data, pagination, payload.total, payload.stats));
+      return;
+    }
 
     res.json(buildDataResponse(payload.data, { total: payload.total, ...payload.stats }));
   } catch (error) {
@@ -212,6 +225,55 @@ router.post("/:id/status", requireAuth, requireAgencyRole, upload.array("images"
     });
 
     res.json(buildDataResponse(laporan));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/reports/:id/clarification
+router.post("/:id/clarification", requireAuth, requireCitizenRole, upload.array("images", 5), async (req, res, next) => {
+  try {
+    const uploadedImagePaths = await uploadFilesToBucket(req.files, "clarification-images");
+    const bodyImagePaths = getBodyStringArray(req.body.images);
+    const laporan = await submitReportClarification({
+      id: String(req.params.id),
+      userId: req.user.id,
+      note: getBodyString(req.body.note) ?? getBodyString(req.body.clarificationNote),
+      images: [...uploadedImagePaths, ...bodyImagePaths],
+    });
+
+    res.json(buildDataResponse(laporan));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/reports/:id/vote
+router.post("/:id/vote", requireAuth, requireCitizenRole, async (req, res, next) => {
+  try {
+    const result = await voteReport({
+      id: String(req.params.id),
+      userId: req.user.id,
+      vote: req.body.vote,
+    });
+
+    res.json(buildDataResponse(result));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/reports/:id/rating
+router.post("/:id/rating", requireAuth, requireCitizenRole, async (req, res, next) => {
+  try {
+    const result = await rateReport({
+      id: String(req.params.id),
+      userId: req.user.id,
+      score: req.body.score,
+      note: req.body.note,
+    });
+
+    res.json(buildDataResponse(result));
   } catch (error) {
     next(error);
   }

@@ -21,12 +21,14 @@ export interface ListReportLocationsInput {
   userId?: string;
   role?: string;
   scope?: ReportsScope;
+  pagination?: PaginationParams;
   status?: string;
   kategoriId?: string;
   dinasId?: string;
   cabangDinasId?: string;
   createdById?: string;
   search?: string;
+  sort?: string;
   minLat?: number;
   maxLat?: number;
   minLng?: number;
@@ -77,4 +79,24 @@ export interface ResolveReportInput {
   resolutionNote?: unknown;
   agencyNote?: unknown;
   resolutionImages?: string[];
+}
+
+export interface SubmitReportClarificationInput {
+  id: string;
+  userId: string;
+  note?: unknown;
+  images?: string[];
+}
+
+export interface VoteReportInput {
+  id: string;
+  userId: string;
+  vote?: unknown;
+}
+
+export interface RateReportInput {
+  id: string;
+  userId: string;
+  score?: unknown;
+  note?: unknown;
 }
