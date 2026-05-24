@@ -12,7 +12,7 @@ import {
   getPortalForRole,
   type AuthPortal,
 } from "../utils/authPortal.js";
-import { sendAuthOtpEmail } from "../services/authOtpEmailService.js";
+import { sendAuthOtpEmail } from "../modules/auth/auth-otp-email.service.js";
 
 const betterAuthUrl = process.env.BETTER_AUTH_URL || "http://localhost:3000";
 const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
