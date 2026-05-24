@@ -32,11 +32,6 @@ function formatTimestamp() {
 export function requestLogger(req: Request, res: Response, next: NextFunction) {
   const start = Date.now();
 
-  if (req.path === "/api/health" || req.path === "/api/health/live") {
-    next();
-    return;
-  }
-
   const originalJson = res.json.bind(res);
   let responseBody: unknown;
 

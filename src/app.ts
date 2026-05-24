@@ -23,9 +23,16 @@ import adminRouter from "./modules/admin/admin.routes.js";
 
 export function createApp() {
   const app = express();
+  app.disable("etag");
 
   app.use(corsMiddleware);
   app.use(requestLogger);
+  app.use("/api", (_req, res, next) => {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    next();
+  });
 
   app.use("/api/auth", authRouter);
   app.all("/api/auth/*splat", toNodeHandler(auth));
