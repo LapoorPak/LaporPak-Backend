@@ -104,6 +104,7 @@ export async function getReportDashboardSummary(where: Prisma.LaporanWhereInput)
 export async function getAgencyDashboardScope(input: {
   userId: string;
   role: string;
+  scope?: "mine" | "all";
   requestedDinasId?: string;
   requestedCabangDinasId?: string;
 }) {
@@ -182,7 +183,24 @@ export async function getAgencyDashboardScope(input: {
       throw new AppError("Forbidden", 403);
     }
 
+    if (input.scope === "all" && !input.requestedDinasId && !input.requestedCabangDinasId) {
+      return {
+        dinasId: null,
+        cabangDinasId: null,
+        dinas: null,
+        cabangDinas: null,
+        officerDinasId,
+        officerCabangDinas: {
+          id: officer.cabangDinas.id,
+          name: officer.cabangDinas.name,
+          wilayah: officer.cabangDinas.wilayah,
+        },
+        isAdminScope: false,
+      };
+    }
+
     scopeDinasId = officerDinasId;
+    scopeCabangDinasId = requestedCabang ? requestedCabang.id : null;
 
     return {
       dinasId: scopeDinasId,
@@ -200,6 +218,7 @@ export async function getAgencyDashboardScope(input: {
         name: officer.cabangDinas.name,
         wilayah: officer.cabangDinas.wilayah,
       },
+      officerDinasId,
       isAdminScope: false,
     };
   }
@@ -237,6 +256,7 @@ export async function getAgencyDashboardScope(input: {
         }
       : null,
     officerCabangDinas: null,
+    officerDinasId: null,
     isAdminScope: true,
   };
 }

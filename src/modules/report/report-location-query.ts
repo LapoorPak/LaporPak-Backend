@@ -131,7 +131,12 @@ export function buildReportLocationWhere(input: {
 
 export async function getReportLocationPayload(
   where: Prisma.LaporanWhereInput,
-  viewer?: { role?: string; dinasId?: string | null; userId?: string | null },
+  viewer?: {
+    role?: string;
+    dinasId?: string | null;
+    cabangDinasId?: string | null;
+    userId?: string | null;
+  },
   options?: { pagination?: { skip: number; take: number }; sort?: string },
 ) {
   const reportLocationSelect = {
@@ -236,7 +241,8 @@ export async function getReportLocationPayload(
         const isOwnCitizenReport = Boolean(viewer?.userId && report.createdBy?.id === viewer.userId);
         const isScopedAgencyReport =
           viewer?.role === "admin" ||
-          Boolean(viewer?.dinasId && report.kategori?.dinas?.id === viewer.dinasId);
+          Boolean(viewer?.dinasId && report.kategori?.dinas?.id === viewer.dinasId) ||
+          Boolean(viewer?.cabangDinasId && report.cabangDinas?.id === viewer.cabangDinasId);
 
         return {
           id: report.id,
@@ -289,7 +295,8 @@ export async function getReportLocationPayload(
       const isOwnCitizenReport = Boolean(viewer?.userId && report.createdBy?.id === viewer.userId);
       const isScopedAgencyReport =
         viewer?.role === "admin" ||
-        Boolean(viewer?.dinasId && report.kategori?.dinas?.id === viewer.dinasId);
+        Boolean(viewer?.dinasId && report.kategori?.dinas?.id === viewer.dinasId) ||
+        Boolean(viewer?.cabangDinasId && report.cabangDinas?.id === viewer.cabangDinasId);
 
       return {
         id: report.id,

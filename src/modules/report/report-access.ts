@@ -17,7 +17,10 @@ export async function assertReportEditableByUser(id: string, userId: string) {
   const [laporan, user] = await Promise.all([
     prisma.laporan.findUnique({
       where: { id },
-      include: { kategori: { include: { dinas: true } } },
+      include: {
+        kategori: { select: { dinasId: true } },
+        cabangDinas: { select: { dinasId: true } },
+      },
     }),
     prisma.user.findUnique({
       where: { id: userId },
@@ -41,7 +44,9 @@ export async function assertReportEditableByUser(id: string, userId: string) {
   }
 
   const officerDinasId = user?.petugas?.cabangDinas.dinasId;
-  if (!officerDinasId || laporan.kategori?.dinasId !== officerDinasId) {
+  const reportDinasId = laporan.cabangDinas?.dinasId ?? laporan.kategori?.dinasId;
+
+  if (!officerDinasId || reportDinasId !== officerDinasId) {
     throw new AppError("Forbidden", 403);
   }
 

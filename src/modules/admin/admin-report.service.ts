@@ -1,6 +1,10 @@
 import { prisma } from "../../config/db.js";
 import { LaporanStatus, Prisma } from "../../generated/prisma/client.js";
 import { AppError } from "../../middleware/authMiddleware.js";
+import {
+  newReportNotification,
+  notifyReportOfficers,
+} from "../notification/notification.service.js";
 import { VALID_REPORT_STATUSES } from "../report/report-status.js";
 
 type ReportVoteSummary = {
@@ -201,7 +205,10 @@ export async function adminUpdateLaporanStatus(input: {
 
 export async function adminAssignLaporan(id: string, cabangDinasId: string) {
   const [laporan, cabang] = await Promise.all([
-    prisma.laporan.findUnique({ where: { id } }),
+    prisma.laporan.findUnique({
+      where: { id },
+      include: { kategori: true },
+    }),
     prisma.cabangDinas.findUnique({ where: { id: cabangDinasId } }),
   ]);
 
@@ -223,6 +230,16 @@ export async function adminAssignLaporan(id: string, cabangDinasId: string) {
     include: adminReportMutationInclude,
   });
   const voteMap = await getAdminReportVoteSummaries([updated.id]);
+  notifyReportOfficers({
+    dinasId: cabang.dinasId,
+    cabangDinasId,
+    data: newReportNotification(
+      updated.title,
+      updated.id,
+      laporan.kategori?.name ?? "Laporan",
+    ),
+  }).catch((error) => console.error("[notification] assign notify failed:", error));
+
   return withReportVoteSummary(updated, voteMap);
 }
 

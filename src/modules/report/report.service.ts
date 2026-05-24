@@ -6,7 +6,7 @@ import {
   citizenClarificationNotification,
   citizenStatusNotification,
   newReportNotification,
-  notifyCabangOfficers,
+  notifyReportOfficers,
   notifyUser,
   officerStatusNotification,
 } from "../notification/notification.service.js";
@@ -249,7 +249,9 @@ export async function listMyReports(input: ListMyReportsInput) {
 
 export async function listReportLocations(input: ListReportLocationsInput) {
   let scopedDinasId = input.dinasId;
+  let scopedCabangDinasId = input.cabangDinasId;
   let viewerDinasId: string | null = null;
+  let viewerCabangDinasId: string | null = null;
 
   if (input.scope && input.role && input.role !== "warga" && input.role !== "admin") {
     if (!input.userId) {
@@ -258,7 +260,7 @@ export async function listReportLocations(input: ListReportLocationsInput) {
 
     const officer = await prisma.petugasDinas.findUnique({
       where: { userId: input.userId },
-      select: { cabangDinas: { select: { dinasId: true } } },
+      select: { cabangDinas: { select: { id: true, dinasId: true } } },
     });
 
     if (!officer) {
@@ -266,16 +268,20 @@ export async function listReportLocations(input: ListReportLocationsInput) {
     }
 
     viewerDinasId = officer.cabangDinas.dinasId;
-    scopedDinasId = viewerDinasId;
+    viewerCabangDinasId = officer.cabangDinas.id;
+    if (input.scope === "mine") {
+      scopedDinasId = viewerDinasId;
+    }
   } else if (input.role === "admin") {
     viewerDinasId = input.dinasId ?? null;
+    viewerCabangDinasId = input.cabangDinasId ?? null;
   }
 
   const where = buildReportLocationWhere({
     status: validateReportStatus(input.status),
     kategoriId: input.kategoriId,
     dinasId: scopedDinasId,
-    cabangDinasId: input.cabangDinasId,
+    cabangDinasId: scopedCabangDinasId,
     createdById: input.createdById,
     search: input.search,
     minLat: input.minLat,
@@ -288,6 +294,7 @@ export async function listReportLocations(input: ListReportLocationsInput) {
   return getReportLocationPayload(where, {
     role: input.role,
     dinasId: viewerDinasId,
+    cabangDinasId: viewerCabangDinasId,
     userId: input.userId,
   }, {
     pagination: input.pagination,
@@ -300,12 +307,13 @@ export async function getReportDashboard(input: GetReportDashboardInput) {
   const scope = await getAgencyDashboardScope({
     userId: input.userId,
     role: input.role,
+    scope: input.scope,
     requestedDinasId: input.requestedDinasId,
     requestedCabangDinasId: input.requestedCabangDinasId,
   });
   const baseWhere = buildReportDashboardBaseWhere({
     search: input.search,
-    dinasId: scope.dinasId,
+    dinasId: scope.dinasId ?? undefined,
     cabangDinasId: scope.cabangDinasId ?? undefined,
     kategoriId: input.kategoriId,
   });
@@ -364,6 +372,10 @@ export async function getReportDashboard(input: GetReportDashboardInput) {
     data: reports.map((report) => {
       const presentation = getDashboardStatusPresentation(report.status);
       const dinas = report.cabangDinas?.dinas ?? report.kategori?.dinas ?? null;
+      const canEdit =
+        scope.isAdminScope ||
+        Boolean(scope.officerDinasId && dinas?.id === scope.officerDinasId) ||
+        Boolean(scope.officerCabangDinas?.id && report.cabangDinas?.id === scope.officerCabangDinas.id);
       const instansiName =
         report.cabangDinas?.name || dinas?.short || dinas?.name || "Belum ditugaskan";
 
@@ -378,6 +390,8 @@ export async function getReportDashboard(input: GetReportDashboardInput) {
         date: report.createdAt,
         dateLabel: DASHBOARD_DATE_FORMATTER.format(report.createdAt),
         agencyName: instansiName,
+        canEdit,
+        ownership: canEdit ? "mine" : "other",
         dinas: dinas
           ? {
               id: dinas.id,
@@ -622,12 +636,11 @@ export async function createReport(input: CreateReportInput) {
     candidateCabang: routing?.candidateCabang ?? [],
   });
 
-  if (routing?.assignedCabang?.id) {
-    notifyCabangOfficers(
-      routing.assignedCabang.id,
-      newReportNotification(laporan.title, laporan.id, resolvedKategori!.name),
-    ).catch((error) => console.error("[notification] failed to notify cabang officers:", error));
-  }
+  notifyReportOfficers({
+    dinasId: resolvedKategori?.dinasId,
+    cabangDinasId: routing?.assignedCabang?.id,
+    data: newReportNotification(laporan.title, laporan.id, resolvedKategori!.name),
+  }).catch((error) => console.error("[notification] failed to notify report officers:", error));
 
   return {
     ...laporan,
@@ -675,8 +688,12 @@ export async function updateReportStatus(input: UpdateReportStatusInput) {
   const resolutionNote = normalizeOptionalText(input.resolutionNote);
   const images = normalizeImagePaths(input.images);
 
-  if (status === LaporanStatus.clarification_requested && !agencyNote) {
-    throw new AppError("Catatan klarifikasi wajib diisi.", 400);
+  if (!agencyNote) {
+    throw new AppError("Catatan update wajib diisi.", 400);
+  }
+
+  if (images.length === 0) {
+    throw new AppError("Bukti foto update wajib diupload.", 400);
   }
 
   const laporan = await prisma.laporan.update({
@@ -706,12 +723,12 @@ export async function updateReportStatus(input: UpdateReportStatusInput) {
     userId: laporan.createdById,
   }).catch((error) => console.error("[notification] citizen notify failed:", error));
 
-  if (laporan.cabangDinas?.id) {
-    notifyCabangOfficers(
-      laporan.cabangDinas.id,
-      officerStatusNotification(status, laporan.title, laporan.id, laporan.assignedTo?.name),
-    ).catch((error) => console.error("[notification] cabang notify failed:", error));
-  }
+  notifyReportOfficers({
+    dinasId: laporan.kategori?.dinasId,
+    cabangDinasId: laporan.cabangDinas?.id,
+    data: officerStatusNotification(status, laporan.title, laporan.id, laporan.assignedTo?.name),
+    excludeUserId: input.userId,
+  }).catch((error) => console.error("[notification] officer status notify failed:", error));
 
   return {
     ...laporan,
@@ -766,12 +783,11 @@ export async function submitReportClarification(input: SubmitReportClarification
     include: reportDetailInclude,
   });
 
-  if (existing.cabangDinasId) {
-    notifyCabangOfficers(
-      existing.cabangDinasId,
-      citizenClarificationNotification(existing.title, existing.id, existing.createdBy.name),
-    ).catch((error) => console.error("[notification] cabang clarification notify failed:", error));
-  }
+  notifyReportOfficers({
+    dinasId: existing.kategori?.dinasId,
+    cabangDinasId: existing.cabangDinasId,
+    data: citizenClarificationNotification(existing.title, existing.id, existing.createdBy.name),
+  }).catch((error) => console.error("[notification] officer clarification notify failed:", error));
 
   const feedbackMap = await getReportFeedbackByIds([laporan.id], input.userId);
 
@@ -873,6 +889,10 @@ export async function resolveReport(input: ResolveReportInput) {
     throw new AppError("Bukti foto penyelesaian wajib diupload.", 400);
   }
 
+  if (!agencyNote && !resolutionNote) {
+    throw new AppError("Catatan penyelesaian wajib diisi.", 400);
+  }
+
   const laporan = await prisma.laporan.update({
     where: { id: input.id },
     data: {
@@ -901,12 +921,12 @@ export async function resolveReport(input: ResolveReportInput) {
     userId: laporan.createdById,
   }).catch((error) => console.error("[notification] citizen notify failed:", error));
 
-  if (laporan.cabangDinas?.id) {
-    notifyCabangOfficers(
-      laporan.cabangDinas.id,
-      officerStatusNotification("resolved", laporan.title, laporan.id, laporan.assignedTo?.name),
-    ).catch((error) => console.error("[notification] cabang notify failed:", error));
-  }
+  notifyReportOfficers({
+    dinasId: laporan.kategori?.dinasId,
+    cabangDinasId: laporan.cabangDinas?.id,
+    data: officerStatusNotification("resolved", laporan.title, laporan.id, laporan.assignedTo?.name),
+    excludeUserId: input.userId,
+  }).catch((error) => console.error("[notification] officer resolve notify failed:", error));
 
   return {
     ...laporan,
