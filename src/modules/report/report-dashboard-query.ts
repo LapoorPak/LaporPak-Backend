@@ -1,5 +1,5 @@
 import { prisma } from "../../config/db.js";
-import { LaporanStatus, Prisma } from "../../generated/prisma/client.js";
+import { LaporanStatus, Prisma, Stsrc } from "../../generated/prisma/client.js";
 import { AppError } from "../../middleware/authMiddleware.js";
 
 export function combineReportWhere(
@@ -30,7 +30,10 @@ export function buildReportDashboardBaseWhere(input: {
   cabangDinasId?: string;
   kategoriId?: string;
 }): Prisma.LaporanWhereInput {
-  const filters: Prisma.LaporanWhereInput[] = [{ status: { not: LaporanStatus.rejected } }];
+  const filters: Prisma.LaporanWhereInput[] = [
+    { status: { not: LaporanStatus.rejected } },
+    { stsrc: { not: Stsrc.D } },
+  ];
 
   if (input.dinasId) {
     filters.push({ kategori: { dinasId: input.dinasId } });
@@ -113,8 +116,8 @@ export async function getAgencyDashboardScope(input: {
   let scopeCabangDinasId = input.requestedCabangDinasId ?? null;
 
   const requestedCabang = input.requestedCabangDinasId
-    ? await prisma.cabangDinas.findUnique({
-        where: { id: input.requestedCabangDinasId },
+    ? await prisma.cabangDinas.findFirst({
+        where: { id: input.requestedCabangDinasId, stsrc: { not: Stsrc.D } },
         select: {
           id: true,
           name: true,
@@ -229,8 +232,8 @@ export async function getAgencyDashboardScope(input: {
 
   const dinas =
     requestedCabang?.dinas ??
-    (await prisma.dinas.findUnique({
-      where: { id: scopeDinasId },
+    (await prisma.dinas.findFirst({
+      where: { id: scopeDinasId, stsrc: { not: Stsrc.D } },
       select: {
         id: true,
         code: true,

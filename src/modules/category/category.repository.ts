@@ -1,6 +1,8 @@
 import { prisma } from "../../config/db.js";
-import type { Prisma } from "../../generated/prisma/client.js";
+import { Stsrc, type Prisma } from "../../generated/prisma/client.js";
 import type { PaginationParams } from "../../utils/apiResponse.js";
+
+const notDeleted = { not: Stsrc.D };
 
 export function findCategories(
   where: Prisma.KategoriLaporanWhereInput,
@@ -31,7 +33,7 @@ export function groupCategoriesByDinas(where: Prisma.KategoriLaporanWhereInput) 
 
 export function findDinasSummariesByIds(ids: string[]) {
   return prisma.dinas.findMany({
-    where: { id: { in: ids } },
+    where: { id: { in: ids }, stsrc: notDeleted },
     select: { id: true, code: true, name: true },
   });
 }

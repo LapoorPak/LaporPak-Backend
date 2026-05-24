@@ -1,4 +1,4 @@
-import { LaporanStatus, Prisma } from "../../generated/prisma/client.js";
+import { LaporanStatus, Prisma, Stsrc } from "../../generated/prisma/client.js";
 import { AppError } from "../../middleware/authMiddleware.js";
 import {
   countAgencies,
@@ -30,10 +30,12 @@ function buildAgencyLocationWhere(input: AgencyLocationFilters): Prisma.CabangDi
   const filters: Prisma.CabangDinasWhereInput[] = [
     {
       isRoutingEnabled: true,
+      stsrc: { not: Stsrc.D },
       latitude: { not: null },
       longitude: { not: null },
       dinas: {
         isActive: true,
+        stsrc: { not: Stsrc.D },
         ...(input.type ? { type: input.type } : {}),
         ...(input.dinasId ? { id: input.dinasId } : {}),
       },
@@ -119,6 +121,7 @@ export function validateAgencyReportStatus(status?: string) {
 
 export async function listAgencies(input: ListAgenciesInput) {
   const where: Prisma.DinasWhereInput = {
+    stsrc: { not: Stsrc.D },
     ...(input.search ? { name: { contains: input.search, mode: "insensitive" } } : {}),
     ...(input.type ? { type: input.type } : {}),
   };
@@ -215,6 +218,7 @@ export async function getAgencyStats(id: string) {
 
 export async function listAgencyReports(input: ListAgencyReportsInput) {
   const where: Prisma.LaporanWhereInput = {
+    stsrc: { not: Stsrc.D },
     kategori: { dinasId: input.agencyId },
     ...(input.status ? { status: input.status } : {}),
   };

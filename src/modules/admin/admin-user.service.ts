@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { hashPassword } from "better-auth/crypto";
 import { prisma } from "../../config/db.js";
+import { Stsrc } from "../../generated/prisma/client.js";
 import { AppError } from "../../middleware/authMiddleware.js";
 import type { ListAdminUsersInput } from "../../types/admin.js";
 
@@ -146,8 +147,8 @@ export async function assignPetugasToUser(input: {
 }) {
   const [user, cabang] = await Promise.all([
     prisma.user.findUnique({ where: { id: input.userId } }),
-    prisma.cabangDinas.findUnique({
-      where: { id: input.cabangDinasId },
+    prisma.cabangDinas.findFirst({
+      where: { id: input.cabangDinasId, stsrc: { not: Stsrc.D } },
       include: { dinas: true },
     }),
   ]);

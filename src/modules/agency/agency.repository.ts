@@ -1,6 +1,8 @@
 import { prisma } from "../../config/db.js";
-import type { Prisma } from "../../generated/prisma/client.js";
+import { Stsrc, type Prisma } from "../../generated/prisma/client.js";
 import type { PaginationParams } from "../../utils/apiResponse.js";
+
+const notDeleted = { not: Stsrc.D };
 
 export function findAgencies(
   where: Prisma.DinasWhereInput,
@@ -8,7 +10,7 @@ export function findAgencies(
 ) {
   return prisma.dinas.findMany({
     where,
-    include: { kategori: true },
+    include: { kategori: { where: { stsrc: notDeleted } } },
     orderBy: { name: "asc" },
     skip: pagination.skip,
     take: pagination.take,
@@ -87,17 +89,18 @@ export function groupAgencyLocationsByCityRegency(where: Prisma.CabangDinasWhere
 
 export function findAgencySummariesByIds(ids: string[]) {
   return prisma.dinas.findMany({
-    where: { id: { in: ids } },
+    where: { id: { in: ids }, stsrc: notDeleted },
     select: { id: true, code: true, type: true, name: true },
   });
 }
 
 export function findAgencyById(id: string) {
   return prisma.dinas.findUnique({
-    where: { id },
+    where: { id, stsrc: notDeleted },
     include: {
-      kategori: true,
+      kategori: { where: { stsrc: notDeleted } },
       cabang: {
+        where: { stsrc: notDeleted },
         include: {
           petugas: {
             include: {
@@ -112,7 +115,7 @@ export function findAgencyById(id: string) {
 
 export function findAgencyId(id: string) {
   return prisma.dinas.findUnique({
-    where: { id },
+    where: { id, stsrc: notDeleted },
     select: { id: true },
   });
 }
@@ -120,7 +123,7 @@ export function findAgencyId(id: string) {
 export function groupAgencyReportsByStatus(agencyId: string) {
   return prisma.laporan.groupBy({
     by: ["status"],
-    where: { kategori: { dinasId: agencyId } },
+    where: { kategori: { dinasId: agencyId }, stsrc: notDeleted },
     _count: true,
   });
 }
@@ -167,7 +170,7 @@ export function groupAgencyReportsByCategory(where: Prisma.LaporanWhereInput) {
 
 export function findCategorySummariesByIds(ids: string[]) {
   return prisma.kategoriLaporan.findMany({
-    where: { id: { in: ids } },
+    where: { id: { in: ids }, stsrc: notDeleted },
     select: { id: true, code: true, name: true },
   });
 }

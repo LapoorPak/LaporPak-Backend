@@ -1,5 +1,5 @@
 import { prisma } from "../../config/db.js";
-import { LaporanStatus, Prisma } from "../../generated/prisma/client.js";
+import { LaporanStatus, Prisma, Stsrc } from "../../generated/prisma/client.js";
 import { AppError } from "../../middleware/authMiddleware.js";
 import {
   newReportNotification,
@@ -72,7 +72,7 @@ function buildAdminReportWhere(input: {
   cabangDinasId?: string;
   kategoriId?: string;
 }) {
-  const filters: Prisma.LaporanWhereInput[] = [];
+  const filters: Prisma.LaporanWhereInput[] = [{ stsrc: { not: Stsrc.D } }];
 
   if (input.status && VALID_REPORT_STATUSES.includes(input.status as LaporanStatus)) {
     filters.push({ status: input.status as LaporanStatus });
@@ -103,7 +103,7 @@ function buildAdminReportWhere(input: {
     });
   }
 
-  return filters.length > 0 ? { AND: filters } : {};
+  return { AND: filters };
 }
 
 const adminReportListInclude = {
@@ -156,8 +156,8 @@ export async function listAdminLaporan(input: {
 }
 
 export async function getAdminLaporanDetail(id: string) {
-  const laporan = await prisma.laporan.findUnique({
-    where: { id },
+  const laporan = await prisma.laporan.findFirst({
+    where: { id, stsrc: { not: Stsrc.D } },
     include: adminReportDetailInclude,
   });
 
@@ -176,7 +176,9 @@ export async function adminUpdateLaporanStatus(input: {
   resolutionNote?: string | null;
   adminUserId: string;
 }) {
-  const laporan = await prisma.laporan.findUnique({ where: { id: input.id } });
+  const laporan = await prisma.laporan.findFirst({
+    where: { id: input.id, stsrc: { not: Stsrc.D } },
+  });
   if (!laporan) {
     throw new AppError("Laporan tidak ditemukan", 404);
   }
@@ -192,6 +194,7 @@ export async function adminUpdateLaporanStatus(input: {
     where: { id: input.id },
     data: {
       status: input.status as LaporanStatus,
+      stsrc: Stsrc.U,
       ...(input.agencyNote !== undefined ? { agencyNote: input.agencyNote } : {}),
       ...(input.resolutionNote !== undefined ? { resolutionNote: input.resolutionNote } : {}),
       resolvedAt: input.status === LaporanStatus.resolved ? new Date() : undefined,
@@ -205,11 +208,13 @@ export async function adminUpdateLaporanStatus(input: {
 
 export async function adminAssignLaporan(id: string, cabangDinasId: string) {
   const [laporan, cabang] = await Promise.all([
-    prisma.laporan.findUnique({
-      where: { id },
+    prisma.laporan.findFirst({
+      where: { id, stsrc: { not: Stsrc.D } },
       include: { kategori: true },
     }),
-    prisma.cabangDinas.findUnique({ where: { id: cabangDinasId } }),
+    prisma.cabangDinas.findFirst({
+      where: { id: cabangDinasId, stsrc: { not: Stsrc.D } },
+    }),
   ]);
 
   if (!laporan) {
@@ -225,6 +230,7 @@ export async function adminAssignLaporan(id: string, cabangDinasId: string) {
     data: {
       cabangDinasId,
       routingStatus: "manually_assigned",
+      stsrc: Stsrc.U,
       status: laporan.status === LaporanStatus.pending ? LaporanStatus.verified : laporan.status,
     },
     include: adminReportMutationInclude,
@@ -244,11 +250,16 @@ export async function adminAssignLaporan(id: string, cabangDinasId: string) {
 }
 
 export async function adminDeleteLaporan(id: string) {
-  const laporan = await prisma.laporan.findUnique({ where: { id } });
+  const laporan = await prisma.laporan.findFirst({
+    where: { id, stsrc: { not: Stsrc.D } },
+  });
   if (!laporan) {
     throw new AppError("Laporan tidak ditemukan", 404);
   }
 
-  await prisma.laporan.delete({ where: { id } });
+  await prisma.laporan.update({
+    where: { id },
+    data: { stsrc: Stsrc.D },
+  });
   return { id };
 }

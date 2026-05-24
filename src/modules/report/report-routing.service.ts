@@ -1,4 +1,5 @@
 import { prisma } from "../../config/db.js";
+import { Stsrc } from "../../generated/prisma/client.js";
 import type {
   CabangRoutingCandidate,
   CabangRoutingResolution,
@@ -37,12 +38,14 @@ export async function resolveCabangDinas(params: {
   const cabangList = await prisma.cabangDinas.findMany({
     where: {
       isRoutingEnabled: true,
+      stsrc: { not: Stsrc.D },
       OR: [
         { dinas: { type: params.dinasType } },
         { serviceTags: { has: params.dinasType } },
       ],
       dinas: {
         isActive: true,
+        stsrc: { not: Stsrc.D },
       },
     },
     include: {

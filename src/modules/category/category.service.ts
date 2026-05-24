@@ -1,4 +1,4 @@
-import { Prisma } from "../../generated/prisma/client.js";
+import { Prisma, Stsrc } from "../../generated/prisma/client.js";
 import {
   countCategories,
   findCategories,
@@ -9,6 +9,8 @@ import type { ListCategoriesInput } from "../../types/category.js";
 
 export async function listCategories(input: ListCategoriesInput) {
   const where: Prisma.KategoriLaporanWhereInput = {
+    stsrc: { not: Stsrc.D },
+    dinas: { stsrc: { not: Stsrc.D } },
     ...(input.search ? { name: { contains: input.search, mode: "insensitive" } } : {}),
     ...(input.dinasId ? { dinasId: input.dinasId } : {}),
   };

@@ -1,5 +1,5 @@
 import { prisma } from "../../config/db.js";
-import { Prisma } from "../../generated/prisma/client.js";
+import { Prisma, Stsrc } from "../../generated/prisma/client.js";
 import { AppError } from "../../middleware/authMiddleware.js";
 import type {
   ListAdminCabangInput,
@@ -9,6 +9,7 @@ import type {
 
 export async function listAdminDinas(input: ListAdminDinasInput) {
   const where = {
+    stsrc: { not: Stsrc.D },
     ...(input.isActive === undefined ? {} : { isActive: input.isActive }),
     ...(input.search
       ? {
@@ -89,7 +90,7 @@ export async function updateDinas(
   },
 ) {
   const existing = await prisma.dinas.findUnique({ where: { id } });
-  if (!existing) {
+  if (!existing || existing.stsrc === Stsrc.D) {
     throw new AppError("Dinas tidak ditemukan", 404);
   }
 
@@ -111,14 +112,15 @@ export async function updateDinas(
       description: input.description ?? undefined,
       isActive: input.isActive,
       routingPriority: input.routingPriority,
+      stsrc: Stsrc.U,
     },
   });
 }
 
 export async function deleteDinas(id: string) {
   const [kategoriCount, cabangCount] = await Promise.all([
-    prisma.kategoriLaporan.count({ where: { dinasId: id } }),
-    prisma.cabangDinas.count({ where: { dinasId: id } }),
+    prisma.kategoriLaporan.count({ where: { dinasId: id, stsrc: { not: Stsrc.D } } }),
+    prisma.cabangDinas.count({ where: { dinasId: id, stsrc: { not: Stsrc.D } } }),
   ]);
 
   if (kategoriCount > 0 || cabangCount > 0) {
@@ -129,12 +131,16 @@ export async function deleteDinas(id: string) {
     );
   }
 
-  await prisma.dinas.delete({ where: { id } });
+  await prisma.dinas.update({
+    where: { id },
+    data: { stsrc: Stsrc.D, isActive: false },
+  });
   return { id };
 }
 
 export async function listAdminCabang(input: ListAdminCabangInput) {
   const where = {
+    stsrc: { not: Stsrc.D },
     ...(input.dinasId ? { dinasId: input.dinasId } : {}),
     ...(input.isRoutingEnabled === undefined
       ? {}
@@ -195,7 +201,9 @@ export async function createCabang(input: {
   photos?: string[];
   metadata?: Record<string, unknown> | null;
 }) {
-  const dinas = await prisma.dinas.findUnique({ where: { id: input.dinasId } });
+  const dinas = await prisma.dinas.findFirst({
+    where: { id: input.dinasId, stsrc: { not: Stsrc.D } },
+  });
   if (!dinas) {
     throw new AppError("Dinas tidak ditemukan", 404);
   }
@@ -239,7 +247,7 @@ export async function updateCabang(
   },
 ) {
   const existing = await prisma.cabangDinas.findUnique({ where: { id } });
-  if (!existing) {
+  if (!existing || existing.stsrc === Stsrc.D) {
     throw new AppError("Cabang dinas tidak ditemukan", 404);
   }
 
@@ -259,6 +267,7 @@ export async function updateCabang(
       serviceTags: input.serviceTags,
       photos: input.photos,
       metadata: (input.metadata ?? undefined) as Prisma.InputJsonValue | undefined,
+      stsrc: Stsrc.U,
     },
   });
 }
@@ -266,7 +275,7 @@ export async function updateCabang(
 export async function deleteCabang(id: string) {
   const [petugasCount, laporanCount] = await Promise.all([
     prisma.petugasDinas.count({ where: { cabangDinasId: id } }),
-    prisma.laporan.count({ where: { cabangDinasId: id } }),
+    prisma.laporan.count({ where: { cabangDinasId: id, stsrc: { not: Stsrc.D } } }),
   ]);
 
   if (petugasCount > 0 || laporanCount > 0) {
@@ -277,12 +286,16 @@ export async function deleteCabang(id: string) {
     );
   }
 
-  await prisma.cabangDinas.delete({ where: { id } });
+  await prisma.cabangDinas.update({
+    where: { id },
+    data: { stsrc: Stsrc.D, isRoutingEnabled: false },
+  });
   return { id };
 }
 
 export async function listAdminKategori(input: ListAdminKategoriInput) {
   const where = {
+    stsrc: { not: Stsrc.D },
     ...(input.dinasId ? { dinasId: input.dinasId } : {}),
     ...(input.isActive === undefined ? {} : { isActive: input.isActive }),
     ...(input.search
@@ -330,7 +343,9 @@ export async function createKategori(input: {
     throw new AppError("Kode kategori sudah digunakan", 409);
   }
 
-  const dinas = await prisma.dinas.findUnique({ where: { id: input.dinasId } });
+  const dinas = await prisma.dinas.findFirst({
+    where: { id: input.dinasId, stsrc: { not: Stsrc.D } },
+  });
   if (!dinas) {
     throw new AppError("Dinas tidak ditemukan", 404);
   }
@@ -363,7 +378,7 @@ export async function updateKategori(
   },
 ) {
   const existing = await prisma.kategoriLaporan.findUnique({ where: { id } });
-  if (!existing) {
+  if (!existing || existing.stsrc === Stsrc.D) {
     throw new AppError("Kategori tidak ditemukan", 404);
   }
 
@@ -375,7 +390,9 @@ export async function updateKategori(
   }
 
   if (input.dinasId) {
-    const dinas = await prisma.dinas.findUnique({ where: { id: input.dinasId } });
+    const dinas = await prisma.dinas.findFirst({
+      where: { id: input.dinasId, stsrc: { not: Stsrc.D } },
+    });
     if (!dinas) {
       throw new AppError("Dinas tidak ditemukan", 404);
     }
@@ -392,18 +409,24 @@ export async function updateKategori(
       keywords: input.keywords ?? undefined,
       isActive: input.isActive,
       dinasId: input.dinasId,
+      stsrc: Stsrc.U,
     },
   });
 }
 
 export async function deleteKategori(id: string) {
-  const laporanCount = await prisma.laporan.count({ where: { kategoriId: id } });
+  const laporanCount = await prisma.laporan.count({
+    where: { kategoriId: id, stsrc: { not: Stsrc.D } },
+  });
   if (laporanCount > 0) {
     throw new AppError("Tidak bisa menghapus kategori yang sudah dipakai laporan.", 400, {
       laporanCount,
     });
   }
 
-  await prisma.kategoriLaporan.delete({ where: { id } });
+  await prisma.kategoriLaporan.update({
+    where: { id },
+    data: { stsrc: Stsrc.D, isActive: false },
+  });
   return { id };
 }

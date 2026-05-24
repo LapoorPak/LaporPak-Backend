@@ -1,5 +1,5 @@
 import { prisma } from "../../config/db.js";
-import { LaporanStatus, Prisma } from "../../generated/prisma/client.js";
+import { LaporanStatus, Prisma, Stsrc } from "../../generated/prisma/client.js";
 import { AppError } from "../../middleware/authMiddleware.js";
 import {
   aiRejectedReportNotification,
@@ -170,6 +170,7 @@ async function createRejectedReportResult(input: {
 export async function listReports(input: ListReportsInput) {
   const status = validateReportStatus(input.status);
   const where: Prisma.LaporanWhereInput = {
+    stsrc: { not: Stsrc.D },
     ...(status ? { status } : {}),
     ...(input.kategoriId ? { kategoriId: input.kategoriId } : {}),
     ...(input.search ? { title: { contains: input.search, mode: "insensitive" } } : {}),
@@ -209,6 +210,7 @@ export async function listReports(input: ListReportsInput) {
 export async function listMyReports(input: ListMyReportsInput) {
   const status = validateReportStatus(input.status);
   const where: Prisma.LaporanWhereInput = {
+    stsrc: { not: Stsrc.D },
     createdById: input.userId,
     ...(status ? { status } : {}),
     ...(input.kategoriId ? { kategoriId: input.kategoriId } : {}),
@@ -467,8 +469,8 @@ export async function createReport(input: CreateReportInput) {
   }
 
   const manualKategori = input.kategoriId
-    ? await prisma.kategoriLaporan.findUnique({
-        where: { id: input.kategoriId },
+    ? await prisma.kategoriLaporan.findFirst({
+        where: { id: input.kategoriId, stsrc: { not: Stsrc.D } },
         include: { dinas: true },
       })
     : null;
@@ -528,8 +530,8 @@ export async function createReport(input: CreateReportInput) {
       });
     }
 
-    const kategori = await prisma.kategoriLaporan.findUnique({
-      where: { code: analysis.categoryCode! },
+    const kategori = await prisma.kategoriLaporan.findFirst({
+      where: { code: analysis.categoryCode!, stsrc: { not: Stsrc.D } },
       include: { dinas: true },
     });
 
@@ -658,8 +660,8 @@ export async function createReport(input: CreateReportInput) {
 }
 
 export async function getReportById(id: string) {
-  const laporan = await prisma.laporan.findUnique({
-    where: { id },
+  const laporan = await prisma.laporan.findFirst({
+    where: { id, stsrc: { not: Stsrc.D } },
     include: reportDetailInclude,
   });
 
@@ -700,6 +702,7 @@ export async function updateReportStatus(input: UpdateReportStatusInput) {
     where: { id: input.id },
     data: {
       status,
+      stsrc: Stsrc.U,
       ...(input.agencyNote !== undefined || input.resolutionNote !== undefined ? { agencyNote } : {}),
       resolvedAt: null,
       resolvedById: null,
@@ -745,8 +748,8 @@ export async function submitReportClarification(input: SubmitReportClarification
     throw new AppError("Balasan klarifikasi wajib diisi.", 400);
   }
 
-  const existing = await prisma.laporan.findUnique({
-    where: { id: input.id },
+  const existing = await prisma.laporan.findFirst({
+    where: { id: input.id, stsrc: { not: Stsrc.D } },
     include: {
       createdBy: { select: { id: true, name: true } },
       kategori: { include: { dinas: true } },
@@ -770,6 +773,7 @@ export async function submitReportClarification(input: SubmitReportClarification
     where: { id: input.id },
     data: {
       status: LaporanStatus.in_progress,
+      stsrc: Stsrc.U,
       timeline: {
         create: buildTimelineEntry({
           status: LaporanStatus.in_progress,
@@ -839,8 +843,8 @@ export async function voteReport(input: VoteReportInput) {
 export async function rateReport(input: RateReportInput) {
   const score = normalizeRatingScore(input.score);
   const note = normalizeOptionalText(input.note);
-  const laporan = await prisma.laporan.findUnique({
-    where: { id: input.id },
+  const laporan = await prisma.laporan.findFirst({
+    where: { id: input.id, stsrc: { not: Stsrc.D } },
     include: {
       kategori: { include: { dinas: true } },
     },
@@ -897,6 +901,7 @@ export async function resolveReport(input: ResolveReportInput) {
     where: { id: input.id },
     data: {
       status: "resolved",
+      stsrc: Stsrc.U,
       resolvedAt: new Date(),
       resolvedById: input.userId,
       ...(input.agencyNote !== undefined || input.resolutionNote !== undefined ? { agencyNote } : {}),

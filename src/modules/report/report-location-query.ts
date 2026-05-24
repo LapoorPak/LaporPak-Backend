@@ -1,5 +1,5 @@
 import { prisma } from "../../config/db.js";
-import { LaporanStatus, Prisma } from "../../generated/prisma/client.js";
+import { LaporanStatus, Prisma, Stsrc } from "../../generated/prisma/client.js";
 import {
   getReportFeedback,
   getReportFeedbackByIds,
@@ -33,7 +33,7 @@ export async function getReportStats(where: Prisma.LaporanWhereInput) {
     .filter((value): value is string => typeof value === "string");
   const categories = categoryIds.length
     ? await prisma.kategoriLaporan.findMany({
-        where: { id: { in: categoryIds } },
+        where: { id: { in: categoryIds }, stsrc: { not: Stsrc.D } },
         select: { id: true, code: true, name: true },
       })
     : [];
@@ -66,7 +66,7 @@ export function buildReportLocationWhere(input: {
   maxLng?: number;
   excludeRejected?: boolean;
 }): Prisma.LaporanWhereInput {
-  const filters: Prisma.LaporanWhereInput[] = [];
+  const filters: Prisma.LaporanWhereInput[] = [{ stsrc: { not: Stsrc.D } }];
 
   if (input.excludeRejected) {
     filters.push({ status: { not: LaporanStatus.rejected } });
@@ -120,10 +120,6 @@ export function buildReportLocationWhere(input: {
         ...(input.maxLng != null ? { lte: input.maxLng } : {}),
       },
     });
-  }
-
-  if (filters.length === 0) {
-    return {};
   }
 
   return { AND: filters };

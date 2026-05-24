@@ -1,9 +1,10 @@
 import { prisma } from "../../config/db.js";
+import { Stsrc } from "../../generated/prisma/client.js";
 import { AppError } from "../../middleware/authMiddleware.js";
 
 export async function getReportOrThrow(id: string) {
-  const laporan = await prisma.laporan.findUnique({
-    where: { id },
+  const laporan = await prisma.laporan.findFirst({
+    where: { id, stsrc: { not: Stsrc.D } },
   });
 
   if (!laporan) {
@@ -15,8 +16,8 @@ export async function getReportOrThrow(id: string) {
 
 export async function assertReportEditableByUser(id: string, userId: string) {
   const [laporan, user] = await Promise.all([
-    prisma.laporan.findUnique({
-      where: { id },
+    prisma.laporan.findFirst({
+      where: { id, stsrc: { not: Stsrc.D } },
       include: {
         kategori: { select: { dinasId: true } },
         cabangDinas: { select: { dinasId: true } },
