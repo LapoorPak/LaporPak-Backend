@@ -2,21 +2,33 @@ import { prisma } from "../../config/db.js";
 import { NotificationType } from "../../generated/prisma/client.js";
 import type { CreateNotificationInput, NotificationData } from "../../types/notification.js";
 
+type NotifyReportOfficersInput = {
+  dinasId?: string | null;
+  cabangDinasId?: string | null;
+  data: NotificationData;
+  excludeUserId?: string | null;
+};
+
+async function createOfficerNotifications(userIds: string[], data: NotificationData) {
+  const uniqueUserIds = [...new Set(userIds)].filter(Boolean);
+  if (uniqueUserIds.length === 0) return;
+
+  await prisma.notification.createMany({
+    data: uniqueUserIds.map((userId) => ({
+      ...data,
+      deliveredAt: new Date(),
+      userId,
+    })),
+  });
+}
+
 export async function notifyDinasOfficers(dinasId: string, data: NotificationData) {
   const officers = await prisma.petugasDinas.findMany({
     where: { cabangDinas: { dinasId } },
     select: { userId: true },
   });
 
-  if (officers.length === 0) return;
-
-  await prisma.notification.createMany({
-    data: officers.map((o) => ({
-      ...data,
-      deliveredAt: new Date(),
-      userId: o.userId,
-    })),
-  });
+  await createOfficerNotifications(officers.map((officer) => officer.userId), data);
 }
 
 export async function notifyUser(data: CreateNotificationInput) {
@@ -34,15 +46,33 @@ export async function notifyCabangOfficers(cabangDinasId: string, data: Notifica
     select: { userId: true },
   });
 
-  if (officers.length === 0) return;
+  await createOfficerNotifications(officers.map((officer) => officer.userId), data);
+}
 
-  await prisma.notification.createMany({
-    data: officers.map((officer) => ({
-      ...data,
-      deliveredAt: new Date(),
-      userId: officer.userId,
-    })),
+export async function notifyReportOfficers({
+  dinasId,
+  cabangDinasId,
+  data,
+  excludeUserId,
+}: NotifyReportOfficersInput) {
+  if (!dinasId && !cabangDinasId) return;
+
+  const officers = await prisma.petugasDinas.findMany({
+    where: {
+      OR: [
+        ...(dinasId ? [{ cabangDinas: { dinasId } }] : []),
+        ...(cabangDinasId ? [{ cabangDinasId }] : []),
+      ],
+    },
+    select: { userId: true },
   });
+
+  await createOfficerNotifications(
+    officers
+      .map((officer) => officer.userId)
+      .filter((userId) => userId !== excludeUserId),
+    data,
+  );
 }
 
 // Notification for officers when a new report is assigned to their dinas
