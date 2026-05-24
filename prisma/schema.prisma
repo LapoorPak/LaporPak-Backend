@@ -31,6 +31,12 @@ enum NotificationType {
   info
 }
 
+enum Stsrc {
+  A
+  U
+  D
+}
+
 model User {
   id            String    @id
   name          String
@@ -47,9 +53,9 @@ model User {
 
   sessions        Session[]
   accounts        Account[]
-  createdReports  Laporan[]      @relation("ReportCreator")
-  assignedReports Laporan[]      @relation("ReportAssignee")
-  resolvedReports Laporan[]      @relation("ReportResolver")
+  createdReports  Laporan[]       @relation("ReportCreator")
+  assignedReports Laporan[]       @relation("ReportAssignee")
+  resolvedReports Laporan[]       @relation("ReportResolver")
   reportVotes     LaporanVote[]
   reportRatings   LaporanRating[]
   petugas         PetugasDinas?
@@ -103,15 +109,16 @@ model Verification {
 }
 
 model Dinas {
-  id              String                   @id @default(cuid())
-  code            String                   @unique
-  type            String                   @default("")
+  id              String  @id @default(cuid())
+  code            String  @unique
+  type            String  @default("")
   name            String
   short           String
   wilayah         String?
   description     String?
-  isActive        Boolean                  @default(true)
-  routingPriority Int                      @default(100)
+  isActive        Boolean @default(true)
+  routingPriority Int     @default(100)
+  stsrc           Stsrc   @default(A)
 
   kategori         KategoriLaporan[]
   cabang           CabangDinas[]
@@ -120,11 +127,12 @@ model Dinas {
 
   @@index([type, wilayah])
   @@index([isActive, routingPriority])
+  @@index([stsrc])
   @@map("dinas")
 }
 
 model CabangDinas {
-  id               String                   @id @default(cuid())
+  id               String   @id @default(cuid())
   name             String
   wilayah          String
   address          String?
@@ -134,13 +142,14 @@ model CabangDinas {
   province         String?
   cityRegency      String?
   coverageRadiusKm Int?
-  isRoutingEnabled Boolean                  @default(true)
-  serviceTags      String[]                 @default([])
-  photos           String[]                 @default([])
+  isRoutingEnabled Boolean  @default(true)
+  serviceTags      String[] @default([])
+  photos           String[] @default([])
   metadata         Json?
+  stsrc            Stsrc    @default(A)
 
   dinasId String
-  dinas   Dinas @relation(fields: [dinasId], references: [id])
+  dinas   Dinas  @relation(fields: [dinasId], references: [id])
 
   petugas          PetugasDinas[]
   laporan          Laporan[]
@@ -150,6 +159,7 @@ model CabangDinas {
   @@index([dinasId, wilayah])
   @@index([cityRegency, isRoutingEnabled])
   @@index([latitude, longitude])
+  @@index([stsrc])
   @@map("cabang_dinas")
 }
 
@@ -162,6 +172,7 @@ model KategoriLaporan {
   urgencyWeight Int      @default(50)
   keywords      String[] @default([])
   isActive      Boolean  @default(true)
+  stsrc         Stsrc    @default(A)
   dinasId       String
   dinas         Dinas    @relation(fields: [dinasId], references: [id])
 
@@ -169,50 +180,52 @@ model KategoriLaporan {
   routingDecisions LaporanRoutingDecision[]
 
   @@index([dinasId, isActive])
+  @@index([stsrc])
   @@map("kategori_laporan")
 }
 
 model Laporan {
-  id                    String               @id @default(cuid())
-  title                 String
-  description           String
-  status                LaporanStatus        @default(pending)
-  routingStatus         LaporanRoutingStatus @default(pending)
-  images                String[]
-  latitude              Float
-  longitude             Float
-  address               String?
-  kategoriId            String?
-  cabangDinasId         String?
-  createdById           String
-  assignedToId          String?
-  resolvedById          String?
-  aiDecisionStatus      String?
-  aiRejectionCode       String?
-  aiSuggestedRewrite    String?
-  aiClarityScore        Int?
-  aiSeriousnessScore    Int?
-  aiConfidence          Float?
-  aiReasoning           String?
-  aiClassified          Boolean              @default(false)
-  aiUrgencyScore        Int?
-  aiSuggestedSlaHours   Int?
+  id                     String               @id @default(cuid())
+  title                  String
+  description            String
+  status                 LaporanStatus        @default(pending)
+  routingStatus          LaporanRoutingStatus @default(pending)
+  images                 String[]
+  latitude               Float
+  longitude              Float
+  address                String?
+  kategoriId             String?
+  cabangDinasId          String?
+  createdById            String
+  assignedToId           String?
+  resolvedById           String?
+  aiDecisionStatus       String?
+  aiRejectionCode        String?
+  aiSuggestedRewrite     String?
+  aiClarityScore         Int?
+  aiSeriousnessScore     Int?
+  aiConfidence           Float?
+  aiReasoning            String?
+  aiClassified           Boolean              @default(false)
+  aiUrgencyScore         Int?
+  aiSuggestedSlaHours    Int?
   aiAssignedBranchReason String?
-  aiRouteMeta           Json?
-  agencyNote            String?
-  resolutionNote        String?
-  resolutionImages      String[]             @default([])
-  resolvedAt            DateTime?
-  createdAt             DateTime             @default(now())
-  updatedAt             DateTime             @updatedAt
+  aiRouteMeta            Json?
+  agencyNote             String?
+  resolutionNote         String?
+  resolutionImages       String[]             @default([])
+  resolvedAt             DateTime?
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+  stsrc                  Stsrc                @default(A)
 
   kategori    KategoriLaporan? @relation(fields: [kategoriId], references: [id], onDelete: SetNull)
-  cabangDinas CabangDinas?    @relation(fields: [cabangDinasId], references: [id])
-  createdBy   User            @relation("ReportCreator", fields: [createdById], references: [id])
-  assignedTo  User?           @relation("ReportAssignee", fields: [assignedToId], references: [id])
-  resolvedBy  User?           @relation("ReportResolver", fields: [resolvedById], references: [id])
+  cabangDinas CabangDinas?     @relation(fields: [cabangDinasId], references: [id])
+  createdBy   User             @relation("ReportCreator", fields: [createdById], references: [id])
+  assignedTo  User?            @relation("ReportAssignee", fields: [assignedToId], references: [id])
+  resolvedBy  User?            @relation("ReportResolver", fields: [resolvedById], references: [id])
 
-  notifications   Notification[]
+  notifications    Notification[]
   routingDecisions LaporanRoutingDecision[]
   timeline         LaporanTimeline[]
   votes            LaporanVote[]
@@ -223,6 +236,7 @@ model Laporan {
   @@index([cabangDinasId, status])
   @@index([routingStatus, createdAt])
   @@index([latitude, longitude])
+  @@index([stsrc])
   @@map("laporan")
 }
 
@@ -281,20 +295,20 @@ model LaporanTimeline {
 }
 
 model LaporanRoutingDecision {
-  id               String           @id @default(cuid())
-  laporanId        String
-  kategoriId       String?
-  dinasId          String?
-  cabangDinasId    String?
-  source           String           @default("ai")
-  confidence       Float?
-  urgencyScore     Int?
+  id                String   @id @default(cuid())
+  laporanId         String
+  kategoriId        String?
+  dinasId           String?
+  cabangDinasId     String?
+  source            String   @default("ai")
+  confidence        Float?
+  urgencyScore      Int?
   suggestedSlaHours Int?
-  distanceKm       Float?
-  wilayahMatched   String?
-  reasoning        String?
-  candidateCabang  Json?
-  createdAt        DateTime         @default(now())
+  distanceKm        Float?
+  wilayahMatched    String?
+  reasoning         String?
+  candidateCabang   Json?
+  createdAt         DateTime @default(now())
 
   laporan     Laporan          @relation(fields: [laporanId], references: [id], onDelete: Cascade)
   kategori    KategoriLaporan? @relation(fields: [kategoriId], references: [id], onDelete: SetNull)
