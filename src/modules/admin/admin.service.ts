@@ -14,6 +14,9 @@ export {
   listAdminCabang,
   listAdminDinas,
   listAdminKategori,
+  getAdminCabangActivity,
+  getAdminDinasActivity,
+  getAdminKategoriActivity,
   updateCabang,
   updateDinas,
   updateKategori,
@@ -22,11 +25,13 @@ export {
   adminAssignLaporan,
   adminDeleteLaporan,
   adminUpdateLaporanStatus,
+  getAdminReportActivity,
   getAdminLaporanDetail,
   listAdminLaporan,
 } from "./admin-report.service.js";
 export {
   assignPetugasToUser,
+  getAdminUserActivity,
   getAdminUserDetail,
   listAdminUsers,
   removePetugasFromUser,

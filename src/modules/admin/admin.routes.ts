@@ -10,8 +10,13 @@ import {
   deleteCabangController,
   deleteDinasController,
   deleteKategoriController,
+  getAdminCabangActivityController,
+  getAdminDinasActivityController,
+  getAdminKategoriActivityController,
   getAdminLaporanDetailController,
   getAdminOverviewController,
+  getAdminReportActivityController,
+  getAdminUserActivityController,
   getAdminUserDetailController,
   listAdminCabangController,
   listAdminDinasController,
@@ -464,21 +469,25 @@ router.use(requireAuth, requireAdminRole);
 router.get("/overview", asyncHandler(getAdminOverviewController));
 
 router.get("/dinas", asyncHandler(listAdminDinasController));
+router.get("/dinas/activity", asyncHandler(getAdminDinasActivityController));
 router.post("/dinas", asyncHandler(createDinasController));
 router.patch("/dinas/:id", asyncHandler(updateDinasController));
 router.delete("/dinas/:id", asyncHandler(deleteDinasController));
 
 router.get("/cabang", asyncHandler(listAdminCabangController));
+router.get("/cabang/activity", asyncHandler(getAdminCabangActivityController));
 router.post("/cabang", asyncHandler(createCabangController));
 router.patch("/cabang/:id", asyncHandler(updateCabangController));
 router.delete("/cabang/:id", asyncHandler(deleteCabangController));
 
 router.get("/kategori", asyncHandler(listAdminKategoriController));
+router.get("/kategori/activity", asyncHandler(getAdminKategoriActivityController));
 router.post("/kategori", asyncHandler(createKategoriController));
 router.patch("/kategori/:id", asyncHandler(updateKategoriController));
 router.delete("/kategori/:id", asyncHandler(deleteKategoriController));
 
 router.get("/users", asyncHandler(listAdminUsersController));
+router.get("/users/activity", asyncHandler(getAdminUserActivityController));
 router.get("/users/:id", asyncHandler(getAdminUserDetailController));
 router.patch("/users/:id", asyncHandler(updateAdminUserController));
 router.post("/users/:id/reset-password", asyncHandler(resetAdminUserPasswordController));
@@ -486,6 +495,7 @@ router.post("/users/:id/assign-petugas", asyncHandler(assignPetugasToUserControl
 router.delete("/users/:id/assign-petugas", asyncHandler(removePetugasFromUserController));
 
 router.get("/laporan", asyncHandler(listAdminLaporanController));
+router.get("/laporan/activity", asyncHandler(getAdminReportActivityController));
 router.get("/laporan/:id", asyncHandler(getAdminLaporanDetailController));
 router.patch("/laporan/:id/status", asyncHandler(updateAdminLaporanStatusController));
 router.patch("/laporan/:id/assign", asyncHandler(assignAdminLaporanController));

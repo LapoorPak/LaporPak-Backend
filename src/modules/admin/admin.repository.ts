@@ -18,18 +18,18 @@ export async function getAdminOverviewSnapshot() {
     statusCounts,
     topKategoriRaw,
   ] = await Promise.all([
-    prisma.dinas.count({ where: { stsrc: notDeleted } }),
-    prisma.dinas.count({ where: { isActive: true, stsrc: notDeleted } }),
-    prisma.cabangDinas.count({ where: { stsrc: notDeleted } }),
-    prisma.cabangDinas.count({ where: { isRoutingEnabled: true, stsrc: notDeleted } }),
-    prisma.kategoriLaporan.count({ where: { stsrc: notDeleted } }),
-    prisma.kategoriLaporan.count({ where: { isActive: true, stsrc: notDeleted } }),
-    prisma.user.count(),
-    prisma.user.count({ where: { banned: true } }),
-    prisma.petugasDinas.count(),
-    prisma.laporan.count({ where: { stsrc: notDeleted } }),
-    prisma.laporan.groupBy({ by: ["status"], where: { stsrc: notDeleted }, _count: { _all: true } }),
-    prisma.laporan.groupBy({
+    prisma.msDinas.count({ where: { stsrc: notDeleted } }),
+    prisma.msDinas.count({ where: { isActive: true, stsrc: notDeleted } }),
+    prisma.msCabangDinas.count({ where: { stsrc: notDeleted } }),
+    prisma.msCabangDinas.count({ where: { isRoutingEnabled: true, stsrc: notDeleted } }),
+    prisma.msKategoriLaporan.count({ where: { stsrc: notDeleted } }),
+    prisma.msKategoriLaporan.count({ where: { isActive: true, stsrc: notDeleted } }),
+    prisma.msUser.count(),
+    prisma.msUser.count({ where: { banned: true } }),
+    prisma.msPetugasDinas.count(),
+    prisma.trLaporan.count({ where: { stsrc: notDeleted } }),
+    prisma.trLaporan.groupBy({ by: ["status"], where: { stsrc: notDeleted }, _count: { _all: true } }),
+    prisma.trLaporan.groupBy({
       by: ["kategoriId"],
       _count: { _all: true },
       where: { kategoriId: { not: null }, stsrc: notDeleted },
@@ -55,14 +55,14 @@ export async function getAdminOverviewSnapshot() {
 }
 
 export function findAdminOverviewKategoriMappings(kategoriIds: string[]) {
-  return prisma.kategoriLaporan.findMany({
+  return prisma.msKategoriLaporan.findMany({
     where: { id: { in: kategoriIds }, stsrc: notDeleted },
     select: { id: true, dinasId: true },
   });
 }
 
 export function findAdminOverviewDinasSummaries(dinasIds: string[]) {
-  return prisma.dinas.findMany({
+  return prisma.msDinas.findMany({
     where: { id: { in: dinasIds }, stsrc: notDeleted },
     select: { id: true, name: true, short: true },
   });

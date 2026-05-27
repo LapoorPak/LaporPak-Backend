@@ -11,8 +11,13 @@ import {
   deleteCabang,
   deleteDinas,
   deleteKategori,
+  getAdminCabangActivity,
+  getAdminDinasActivity,
   getAdminLaporanDetail,
   getAdminOverview,
+  getAdminKategoriActivity,
+  getAdminReportActivity,
+  getAdminUserActivity,
   getAdminUserDetail,
   listAdminCabang,
   listAdminDinas,
@@ -39,6 +44,43 @@ function getRouteId(req: Request) {
   return getStringValue(req.params.id) ?? "";
 }
 
+function getStringListQuery(value: unknown) {
+  const rawValues = Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : typeof value === "string"
+      ? [value]
+      : [];
+
+  return rawValues
+    .flatMap((item) => item.split(","))
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function getDateQuery(value: unknown, boundary: "start" | "end") {
+  const rawValue = getStringQuery(value);
+  if (!rawValue) return undefined;
+
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(rawValue);
+  if (!match) return undefined;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (Number.isNaN(date.getTime())) return undefined;
+
+  if (boundary === "end") {
+    date.setUTCHours(23, 59, 59, 999);
+  }
+
+  return date;
+}
+
+function getSortDirQuery(value: unknown) {
+  return getStringQuery(value) === "asc" ? "asc" : "desc";
+}
+
 export async function getAdminOverviewController(_req: Request, res: Response) {
   const payload = await getAdminOverview();
   res.json(buildDataResponse(payload));
@@ -50,9 +92,20 @@ export async function listAdminDinasController(req: Request, res: Response) {
     pagination,
     search: getStringQuery(req.query.search),
     isActive: getBooleanQuery(req.query.isActive),
+    sortBy: getStringQuery(req.query.sortBy),
+    sortDir: getSortDirQuery(req.query.sortDir),
   });
 
   res.json(buildListResponse(payload.data, pagination, payload.total));
+}
+
+export async function getAdminDinasActivityController(req: Request, res: Response) {
+  const payload = await getAdminDinasActivity({
+    search: getStringQuery(req.query.search),
+    isActive: getBooleanQuery(req.query.isActive),
+  });
+
+  res.json(buildDataResponse(payload));
 }
 
 export async function createDinasController(req: Request, res: Response) {
@@ -96,12 +149,28 @@ export async function listAdminCabangController(req: Request, res: Response) {
     pagination,
     search: getStringQuery(req.query.search),
     dinasId: getStringQuery(req.query.dinasId),
+    dinasIds: getStringListQuery(req.query.dinasId),
+    wilayah: getStringQuery(req.query.wilayah),
+    cityRegency: getStringQuery(req.query.cityRegency),
+    isRoutingEnabled: getBooleanQuery(req.query.isRoutingEnabled),
+    sortBy: getStringQuery(req.query.sortBy),
+    sortDir: getSortDirQuery(req.query.sortDir),
+  });
+
+  res.json(buildListResponse(payload.data, pagination, payload.total));
+}
+
+export async function getAdminCabangActivityController(req: Request, res: Response) {
+  const payload = await getAdminCabangActivity({
+    search: getStringQuery(req.query.search),
+    dinasId: getStringQuery(req.query.dinasId),
+    dinasIds: getStringListQuery(req.query.dinasId),
     wilayah: getStringQuery(req.query.wilayah),
     cityRegency: getStringQuery(req.query.cityRegency),
     isRoutingEnabled: getBooleanQuery(req.query.isRoutingEnabled),
   });
 
-  res.json(buildListResponse(payload.data, pagination, payload.total));
+  res.json(buildDataResponse(payload));
 }
 
 export async function createCabangController(req: Request, res: Response) {
@@ -156,10 +225,24 @@ export async function listAdminKategoriController(req: Request, res: Response) {
     pagination,
     search: getStringQuery(req.query.search),
     dinasId: getStringQuery(req.query.dinasId),
+    dinasIds: getStringListQuery(req.query.dinasId),
     isActive: getBooleanQuery(req.query.isActive),
+    sortBy: getStringQuery(req.query.sortBy),
+    sortDir: getSortDirQuery(req.query.sortDir),
   });
 
   res.json(buildListResponse(payload.data, pagination, payload.total));
+}
+
+export async function getAdminKategoriActivityController(req: Request, res: Response) {
+  const payload = await getAdminKategoriActivity({
+    search: getStringQuery(req.query.search),
+    dinasId: getStringQuery(req.query.dinasId),
+    dinasIds: getStringListQuery(req.query.dinasId),
+    isActive: getBooleanQuery(req.query.isActive),
+  });
+
+  res.json(buildDataResponse(payload));
 }
 
 export async function createKategoriController(req: Request, res: Response) {
@@ -203,11 +286,27 @@ export async function listAdminUsersController(req: Request, res: Response) {
     pagination,
     search: getStringQuery(req.query.search),
     role: getStringQuery(req.query.role),
+    roles: getStringListQuery(req.query.role),
     banned: getBooleanQuery(req.query.banned),
     hasPetugas: getBooleanQuery(req.query.hasPetugas),
+    dateFrom: getDateQuery(req.query.dateFrom, "start"),
+    dateTo: getDateQuery(req.query.dateTo, "end"),
+    sortBy: getStringQuery(req.query.sortBy),
+    sortDir: getSortDirQuery(req.query.sortDir),
   });
 
   res.json(buildListResponse(payload.data, pagination, payload.total));
+}
+
+export async function getAdminUserActivityController(req: Request, res: Response) {
+  const daysValue = Number(req.query.days);
+  const payload = await getAdminUserActivity({
+    days: Number.isFinite(daysValue) ? daysValue : undefined,
+    dateFrom: getDateQuery(req.query.dateFrom, "start"),
+    dateTo: getDateQuery(req.query.dateTo, "end"),
+  });
+
+  res.json(buildDataResponse(payload));
 }
 
 export async function getAdminUserDetailController(req: Request, res: Response) {
@@ -259,12 +358,33 @@ export async function listAdminLaporanController(req: Request, res: Response) {
     pagination,
     search: getStringQuery(req.query.search),
     status: getStringQuery(req.query.status),
+    statusIds: getStringListQuery(req.query.status),
     dinasId: getStringQuery(req.query.dinasId),
+    dinasIds: getStringListQuery(req.query.dinasId),
     cabangDinasId: getStringQuery(req.query.cabangDinasId),
     kategoriId: getStringQuery(req.query.kategoriId),
+    dateFrom: getDateQuery(req.query.dateFrom, "start"),
+    dateTo: getDateQuery(req.query.dateTo, "end"),
+    sortBy: getStringQuery(req.query.sortBy),
+    sortDir: getSortDirQuery(req.query.sortDir),
   });
 
   res.json(buildListResponse(payload.data, pagination, payload.total));
+}
+
+export async function getAdminReportActivityController(req: Request, res: Response) {
+  const daysValue = Number(req.query.days);
+  const payload = await getAdminReportActivity({
+    days: Number.isFinite(daysValue) ? daysValue : undefined,
+    search: getStringQuery(req.query.search),
+    status: getStringQuery(req.query.status),
+    statusIds: getStringListQuery(req.query.status),
+    dinasIds: getStringListQuery(req.query.dinasId),
+    dateFrom: getDateQuery(req.query.dateFrom, "start"),
+    dateTo: getDateQuery(req.query.dateTo, "end"),
+  });
+
+  res.json(buildDataResponse(payload));
 }
 
 export async function getAdminLaporanDetailController(req: Request, res: Response) {
