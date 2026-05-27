@@ -4,7 +4,7 @@ import type { PaginationParams } from "../utils/apiResponse.js";
 export type DashboardTab = "semua" | "baru" | "diproses" | "klarifikasi" | "tuntas";
 export type ReportsScope = "mine" | "all";
 
-export type ResolvedKategori = Prisma.KategoriLaporanGetPayload<{ include: { dinas: true } }>;
+export type ResolvedKategori = Prisma.MsKategoriLaporanGetPayload<{ include: { dinas: true } }>;
 
 export interface ListReportsInput {
   pagination: PaginationParams;

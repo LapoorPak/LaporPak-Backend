@@ -9,11 +9,11 @@ type NotifyReportOfficersInput = {
   excludeUserId?: string | null;
 };
 
-async function createOfficerNotifications(userIds: string[], data: NotificationData) {
+async function createNotificationsForUsers(userIds: string[], data: NotificationData) {
   const uniqueUserIds = [...new Set(userIds)].filter(Boolean);
   if (uniqueUserIds.length === 0) return;
 
-  await prisma.notification.createMany({
+  await prisma.trNotification.createMany({
     data: uniqueUserIds.map((userId) => ({
       ...data,
       deliveredAt: new Date(),
@@ -23,16 +23,16 @@ async function createOfficerNotifications(userIds: string[], data: NotificationD
 }
 
 export async function notifyDinasOfficers(dinasId: string, data: NotificationData) {
-  const officers = await prisma.petugasDinas.findMany({
+  const officers = await prisma.msPetugasDinas.findMany({
     where: { cabangDinas: { dinasId } },
     select: { userId: true },
   });
 
-  await createOfficerNotifications(officers.map((officer) => officer.userId), data);
+  await createNotificationsForUsers(officers.map((officer) => officer.userId), data);
 }
 
 export async function notifyUser(data: CreateNotificationInput) {
-  await prisma.notification.create({
+  await prisma.trNotification.create({
     data: {
       ...data,
       deliveredAt: new Date(),
@@ -41,12 +41,27 @@ export async function notifyUser(data: CreateNotificationInput) {
 }
 
 export async function notifyCabangOfficers(cabangDinasId: string, data: NotificationData) {
-  const officers = await prisma.petugasDinas.findMany({
+  const officers = await prisma.msPetugasDinas.findMany({
     where: { cabangDinasId },
     select: { userId: true },
   });
 
-  await createOfficerNotifications(officers.map((officer) => officer.userId), data);
+  await createNotificationsForUsers(officers.map((officer) => officer.userId), data);
+}
+
+export async function notifyCitizens(data: NotificationData) {
+  const citizens = await prisma.msUser.findMany({
+    where: {
+      role: "warga",
+      banned: false,
+    },
+    select: { id: true },
+  });
+
+  await createNotificationsForUsers(
+    citizens.map((citizen) => citizen.id),
+    data,
+  );
 }
 
 export async function notifyReportOfficers({
@@ -57,7 +72,7 @@ export async function notifyReportOfficers({
 }: NotifyReportOfficersInput) {
   if (!dinasId && !cabangDinasId) return;
 
-  const officers = await prisma.petugasDinas.findMany({
+  const officers = await prisma.msPetugasDinas.findMany({
     where: {
       OR: [
         ...(dinasId ? [{ cabangDinas: { dinasId } }] : []),
@@ -67,12 +82,43 @@ export async function notifyReportOfficers({
     select: { userId: true },
   });
 
-  await createOfficerNotifications(
+  await createNotificationsForUsers(
     officers
       .map((officer) => officer.userId)
       .filter((userId) => userId !== excludeUserId),
     data,
   );
+}
+
+export function citizenResolvedBroadcastNotification(
+  laporanTitle: string,
+  laporanId: string,
+  dinasName: string,
+  details: {
+    resolutionNote?: string | null;
+    imageUrl?: string | null;
+    reporterUserId?: string | null;
+  } = {},
+): NotificationData {
+  const resolutionNote = details.resolutionNote?.trim() || null;
+
+  return {
+    type: "success",
+    title: "Laporan Warga Selesai",
+    tag: "Selesai",
+    message:
+      resolutionNote ??
+      `Laporan "${laporanTitle}" telah diselesaikan oleh ${dinasName}.`,
+    laporanId,
+    metadata: {
+      kind: "resolved_report",
+      reportTitle: laporanTitle,
+      dinasName,
+      resolutionNote,
+      imageUrl: details.imageUrl ?? null,
+      reporterUserId: details.reporterUserId ?? null,
+    },
+  };
 }
 
 // Notification for officers when a new report is assigned to their dinas

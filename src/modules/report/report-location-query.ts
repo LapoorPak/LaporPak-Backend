@@ -10,16 +10,16 @@ import {
   buildTimelinePayload,
 } from "./report-presenter.js";
 
-export async function getReportStats(where: Prisma.LaporanWhereInput) {
+export async function getReportStats(where: Prisma.TrLaporanWhereInput) {
   const [groupedByStatus, groupedByCategory] = await Promise.all([
-    prisma.laporan.groupBy({
+    prisma.trLaporan.groupBy({
       by: ["status"],
       where,
       _count: {
         _all: true,
       },
     }),
-    prisma.laporan.groupBy({
+    prisma.trLaporan.groupBy({
       by: ["kategoriId"],
       where,
       _count: {
@@ -32,7 +32,7 @@ export async function getReportStats(where: Prisma.LaporanWhereInput) {
     .map((entry) => entry.kategoriId)
     .filter((value): value is string => typeof value === "string");
   const categories = categoryIds.length
-    ? await prisma.kategoriLaporan.findMany({
+    ? await prisma.msKategoriLaporan.findMany({
         where: { id: { in: categoryIds }, stsrc: { not: Stsrc.D } },
         select: { id: true, code: true, name: true },
       })
@@ -65,8 +65,8 @@ export function buildReportLocationWhere(input: {
   minLng?: number;
   maxLng?: number;
   excludeRejected?: boolean;
-}): Prisma.LaporanWhereInput {
-  const filters: Prisma.LaporanWhereInput[] = [{ stsrc: { not: Stsrc.D } }];
+}): Prisma.TrLaporanWhereInput {
+  const filters: Prisma.TrLaporanWhereInput[] = [{ stsrc: { not: Stsrc.D } }];
 
   if (input.excludeRejected) {
     filters.push({ status: { not: LaporanStatus.rejected } });
@@ -126,7 +126,7 @@ export function buildReportLocationWhere(input: {
 }
 
 export async function getReportLocationPayload(
-  where: Prisma.LaporanWhereInput,
+  where: Prisma.TrLaporanWhereInput,
   viewer?: {
     role?: string;
     dinasId?: string | null;
@@ -177,6 +177,8 @@ export async function getReportLocationPayload(
         id: true,
         name: true,
         wilayah: true,
+        address: true,
+        phone: true,
       },
     },
     timeline: {
@@ -190,15 +192,15 @@ export async function getReportLocationPayload(
         createdAt: true,
       },
     },
-  } satisfies Prisma.LaporanSelect;
+  } satisfies Prisma.TrLaporanSelect;
 
   if (options?.sort === "top") {
     const [candidates, total, stats] = await Promise.all([
-      prisma.laporan.findMany({
+      prisma.trLaporan.findMany({
         where,
         select: { id: true, createdAt: true },
       }),
-      prisma.laporan.count({ where }),
+      prisma.trLaporan.count({ where }),
       getReportStats(where),
     ]);
     const feedbackMap = await getReportFeedbackByIds(
@@ -221,7 +223,7 @@ export async function getReportLocationPayload(
       ? sortedIds.slice(options.pagination.skip, options.pagination.skip + options.pagination.take)
       : sortedIds;
     const pageReports = pagedIds.length > 0
-      ? await prisma.laporan.findMany({
+      ? await prisma.trLaporan.findMany({
           where: { id: { in: pagedIds } },
           select: reportLocationSelect,
         })
@@ -271,13 +273,13 @@ export async function getReportLocationPayload(
   }
 
   const [reports, total, stats] = await Promise.all([
-    prisma.laporan.findMany({
+    prisma.trLaporan.findMany({
       where,
       select: reportLocationSelect,
       orderBy: { createdAt: "desc" },
       ...(options?.pagination ? { skip: options.pagination.skip, take: options.pagination.take } : {}),
     }),
-    prisma.laporan.count({ where }),
+    prisma.trLaporan.count({ where }),
     getReportStats(where),
   ]);
   const feedbackMap = await getReportFeedbackByIds(

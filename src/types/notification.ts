@@ -1,4 +1,4 @@
-import type { NotificationType } from "../generated/prisma/client.js";
+import type { NotificationType, Prisma } from "../generated/prisma/client.js";
 import type { PaginationParams } from "../utils/apiResponse.js";
 
 export interface NotificationData {
@@ -7,6 +7,7 @@ export interface NotificationData {
   message: string;
   tag: string;
   laporanId?: string;
+  metadata?: Prisma.InputJsonValue;
 }
 
 export interface CreateNotificationInput extends NotificationData {

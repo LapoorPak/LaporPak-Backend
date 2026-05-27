@@ -3,7 +3,7 @@ import { Stsrc } from "../../generated/prisma/client.js";
 import { AppError } from "../../middleware/authMiddleware.js";
 
 export async function getReportOrThrow(id: string) {
-  const laporan = await prisma.laporan.findFirst({
+  const laporan = await prisma.trLaporan.findFirst({
     where: { id, stsrc: { not: Stsrc.D } },
   });
 
@@ -16,14 +16,14 @@ export async function getReportOrThrow(id: string) {
 
 export async function assertReportEditableByUser(id: string, userId: string) {
   const [laporan, user] = await Promise.all([
-    prisma.laporan.findFirst({
+    prisma.trLaporan.findFirst({
       where: { id, stsrc: { not: Stsrc.D } },
       include: {
         kategori: { select: { dinasId: true } },
         cabangDinas: { select: { dinasId: true } },
       },
     }),
-    prisma.user.findUnique({
+    prisma.msUser.findUnique({
       where: { id: userId },
       select: {
         role: true,

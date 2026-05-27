@@ -5,10 +5,10 @@ import type { PaginationParams } from "../../utils/apiResponse.js";
 const notDeleted = { not: Stsrc.D };
 
 export function findCategories(
-  where: Prisma.KategoriLaporanWhereInput,
+  where: Prisma.MsKategoriLaporanWhereInput,
   pagination: PaginationParams,
 ) {
-  return prisma.kategoriLaporan.findMany({
+  return prisma.msKategoriLaporan.findMany({
     where,
     include: { dinas: true },
     orderBy: { name: "asc" },
@@ -17,12 +17,12 @@ export function findCategories(
   });
 }
 
-export function countCategories(where: Prisma.KategoriLaporanWhereInput) {
-  return prisma.kategoriLaporan.count({ where });
+export function countCategories(where: Prisma.MsKategoriLaporanWhereInput) {
+  return prisma.msKategoriLaporan.count({ where });
 }
 
-export function groupCategoriesByDinas(where: Prisma.KategoriLaporanWhereInput) {
-  return prisma.kategoriLaporan.groupBy({
+export function groupCategoriesByDinas(where: Prisma.MsKategoriLaporanWhereInput) {
+  return prisma.msKategoriLaporan.groupBy({
     by: ["dinasId"],
     where,
     _count: {
@@ -32,7 +32,7 @@ export function groupCategoriesByDinas(where: Prisma.KategoriLaporanWhereInput) 
 }
 
 export function findDinasSummariesByIds(ids: string[]) {
-  return prisma.dinas.findMany({
+  return prisma.msDinas.findMany({
     where: { id: { in: ids }, stsrc: notDeleted },
     select: { id: true, code: true, name: true },
   });

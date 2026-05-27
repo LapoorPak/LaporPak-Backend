@@ -10,7 +10,7 @@ export interface CabangRoutingCandidate {
 }
 
 export interface CabangRoutingResolution {
-  assignedCabang: Prisma.CabangDinasGetPayload<{ include: { dinas: true } }> | null;
+  assignedCabang: Prisma.MsCabangDinasGetPayload<{ include: { dinas: true } }> | null;
   routingStatus: "auto_assigned" | "manual_review" | "failed";
   routingSource: string;
   wilayah: string | null;

@@ -58,7 +58,7 @@ export async function createRoutingDecision(input: {
   reasoning: string | null;
   candidateCabang: unknown;
 }) {
-  await prisma.laporanRoutingDecision.create({
+  await prisma.trLaporanRoutingDecision.create({
     data: {
       laporanId: input.laporanId,
       kategoriId: input.kategoriId,

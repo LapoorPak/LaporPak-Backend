@@ -14,6 +14,23 @@ import {
 } from "../utils/authPortal.js";
 import { sendAuthOtpEmail } from "../modules/auth/auth-otp-email.service.js";
 
+const authPrismaModelAliases = {
+  user: "msUser",
+  session: "trSession",
+  account: "msAccount",
+  verification: "trVerification",
+} as const;
+
+const authPrisma = new Proxy(prisma, {
+  get(target, prop, receiver) {
+    if (typeof prop === "string" && prop in authPrismaModelAliases) {
+      return target[authPrismaModelAliases[prop as keyof typeof authPrismaModelAliases]];
+    }
+
+    return Reflect.get(target, prop, receiver);
+  },
+});
+
 const betterAuthUrl = process.env.BETTER_AUTH_URL || "http://localhost:3000";
 const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
 const isSecureDeployment = betterAuthUrl.startsWith("https://");
@@ -169,6 +186,17 @@ function logPortalDecision(details: Record<string, unknown>) {
   console.log("[AUTH PORTAL]", JSON.stringify(details));
 }
 
+async function markSuccessfulLogin(userId: string) {
+  try {
+    await prisma.msUser.update({
+      where: { id: userId },
+      data: { lastLoginAt: new Date() },
+    });
+  } catch (error) {
+    console.error("[AUTH LOGIN TRACKING]", error);
+  }
+}
+
 async function revokeNewSession(
   ctx: Parameters<typeof createAuthMiddleware>[0] extends (
     ...args: infer A
@@ -188,7 +216,7 @@ async function revokeNewSession(
 }
 
 export const auth = betterAuth({
-  database: prismaAdapter(prisma, {
+  database: prismaAdapter(authPrisma, {
     provider: "postgresql",
   }),
   baseURL: betterAuthUrl,
@@ -280,6 +308,7 @@ export const auth = betterAuth({
       });
 
       if (!targetPortal) {
+        await markSuccessfulLogin(newSession.user.id);
         logPortalDecision({
           decision: "allow",
           reason: "target_portal_not_detected",
@@ -291,6 +320,7 @@ export const auth = betterAuth({
       }
 
       if (userPortal === targetPortal) {
+        await markSuccessfulLogin(newSession.user.id);
         logPortalDecision({
           decision: "allow",
           reason: `${userPortal}_user_on_${targetPortal}_portal`,

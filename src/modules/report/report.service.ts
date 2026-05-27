@@ -4,8 +4,10 @@ import { AppError } from "../../middleware/authMiddleware.js";
 import {
   aiRejectedReportNotification,
   citizenClarificationNotification,
+  citizenResolvedBroadcastNotification,
   citizenStatusNotification,
   newReportNotification,
+  notifyCitizens,
   notifyReportOfficers,
   notifyUser,
   officerStatusNotification,
@@ -81,7 +83,7 @@ const reportCreateInclude = {
   cabangDinas: { include: { dinas: true } },
   createdBy: { select: { id: true, name: true, image: true } },
   timeline: { orderBy: { createdAt: "asc" } },
-} satisfies Prisma.LaporanInclude;
+} satisfies Prisma.TrLaporanInclude;
 
 const reportDetailInclude = {
   kategori: { include: { dinas: true } },
@@ -89,7 +91,7 @@ const reportDetailInclude = {
   createdBy: { select: { id: true, name: true, image: true } },
   assignedTo: { select: { id: true, name: true, image: true } },
   timeline: { orderBy: { createdAt: "asc" } },
-} satisfies Prisma.LaporanInclude;
+} satisfies Prisma.TrLaporanInclude;
 
 async function createRejectedReportResult(input: {
   title: string;
@@ -101,7 +103,7 @@ async function createRejectedReportResult(input: {
   createdById: string;
   analysis: ReportAiAnalysis;
 }) {
-  const rejectedReport = await prisma.laporan.create({
+  const rejectedReport = await prisma.trLaporan.create({
     data: {
       title: input.title,
       description: input.description,
@@ -169,7 +171,7 @@ async function createRejectedReportResult(input: {
 
 export async function listReports(input: ListReportsInput) {
   const status = validateReportStatus(input.status);
-  const where: Prisma.LaporanWhereInput = {
+  const where: Prisma.TrLaporanWhereInput = {
     stsrc: { not: Stsrc.D },
     ...(status ? { status } : {}),
     ...(input.kategoriId ? { kategoriId: input.kategoriId } : {}),
@@ -177,7 +179,7 @@ export async function listReports(input: ListReportsInput) {
   };
 
   const [laporan, total, stats] = await Promise.all([
-    prisma.laporan.findMany({
+    prisma.trLaporan.findMany({
       where,
       include: {
         kategori: { include: { dinas: true } },
@@ -189,7 +191,7 @@ export async function listReports(input: ListReportsInput) {
       skip: input.pagination.skip,
       take: input.pagination.take,
     }),
-    prisma.laporan.count({ where }),
+    prisma.trLaporan.count({ where }),
     getReportStats(where),
   ]);
   const feedbackMap = await getReportFeedbackByIds(laporan.map((item) => item.id));
@@ -209,7 +211,7 @@ export async function listReports(input: ListReportsInput) {
 
 export async function listMyReports(input: ListMyReportsInput) {
   const status = validateReportStatus(input.status);
-  const where: Prisma.LaporanWhereInput = {
+  const where: Prisma.TrLaporanWhereInput = {
     stsrc: { not: Stsrc.D },
     createdById: input.userId,
     ...(status ? { status } : {}),
@@ -218,7 +220,7 @@ export async function listMyReports(input: ListMyReportsInput) {
   };
 
   const [laporan, total, stats] = await Promise.all([
-    prisma.laporan.findMany({
+    prisma.trLaporan.findMany({
       where,
       include: {
         kategori: { include: { dinas: true } },
@@ -229,7 +231,7 @@ export async function listMyReports(input: ListMyReportsInput) {
       skip: input.pagination.skip,
       take: input.pagination.take,
     }),
-    prisma.laporan.count({ where }),
+    prisma.trLaporan.count({ where }),
     getReportStats(where),
   ]);
   const feedbackMap = await getReportFeedbackByIds(
@@ -260,7 +262,7 @@ export async function listReportLocations(input: ListReportLocationsInput) {
       throw new AppError("Unauthorized", 401);
     }
 
-    const officer = await prisma.petugasDinas.findUnique({
+    const officer = await prisma.msPetugasDinas.findUnique({
       where: { userId: input.userId },
       select: { cabangDinas: { select: { id: true, dinasId: true } } },
     });
@@ -322,7 +324,7 @@ export async function getReportDashboard(input: GetReportDashboardInput) {
   const listWhere = combineReportWhere(baseWhere, buildReportDashboardTabWhere(activeTab));
 
   const [reports, total, summary] = await Promise.all([
-    prisma.laporan.findMany({
+    prisma.trLaporan.findMany({
       where: listWhere,
       select: {
         id: true,
@@ -366,7 +368,7 @@ export async function getReportDashboard(input: GetReportDashboardInput) {
       skip: input.pagination.skip,
       take: input.pagination.take,
     }),
-    prisma.laporan.count({ where: listWhere }),
+    prisma.trLaporan.count({ where: listWhere }),
     getReportDashboardSummary(baseWhere),
   ]);
 
@@ -469,7 +471,7 @@ export async function createReport(input: CreateReportInput) {
   }
 
   const manualKategori = input.kategoriId
-    ? await prisma.kategoriLaporan.findFirst({
+    ? await prisma.msKategoriLaporan.findFirst({
         where: { id: input.kategoriId, stsrc: { not: Stsrc.D } },
         include: { dinas: true },
       })
@@ -530,7 +532,7 @@ export async function createReport(input: CreateReportInput) {
       });
     }
 
-    const kategori = await prisma.kategoriLaporan.findFirst({
+    const kategori = await prisma.msKategoriLaporan.findFirst({
       where: { code: analysis.categoryCode!, stsrc: { not: Stsrc.D } },
       include: { dinas: true },
     });
@@ -574,7 +576,7 @@ export async function createReport(input: CreateReportInput) {
   const urgencyScore = computeUrgencyScore(resolvedKategori?.urgencyWeight ?? 50, aiConfidence);
   const suggestedSlaHours = resolvedKategori?.slaHours ?? null;
 
-  const laporan = await prisma.laporan.create({
+  const laporan = await prisma.trLaporan.create({
     data: {
       title: input.title,
       description: input.description,
@@ -660,7 +662,7 @@ export async function createReport(input: CreateReportInput) {
 }
 
 export async function getReportById(id: string) {
-  const laporan = await prisma.laporan.findFirst({
+  const laporan = await prisma.trLaporan.findFirst({
     where: { id, stsrc: { not: Stsrc.D } },
     include: reportDetailInclude,
   });
@@ -698,7 +700,7 @@ export async function updateReportStatus(input: UpdateReportStatusInput) {
     throw new AppError("Bukti foto update wajib diupload.", 400);
   }
 
-  const laporan = await prisma.laporan.update({
+  const laporan = await prisma.trLaporan.update({
     where: { id: input.id },
     data: {
       status,
@@ -748,7 +750,7 @@ export async function submitReportClarification(input: SubmitReportClarification
     throw new AppError("Balasan klarifikasi wajib diisi.", 400);
   }
 
-  const existing = await prisma.laporan.findFirst({
+  const existing = await prisma.trLaporan.findFirst({
     where: { id: input.id, stsrc: { not: Stsrc.D } },
     include: {
       createdBy: { select: { id: true, name: true } },
@@ -769,7 +771,7 @@ export async function submitReportClarification(input: SubmitReportClarification
     throw new AppError("Laporan ini tidak sedang membutuhkan klarifikasi.", 400);
   }
 
-  const laporan = await prisma.laporan.update({
+  const laporan = await prisma.trLaporan.update({
     where: { id: input.id },
     data: {
       status: LaporanStatus.in_progress,
@@ -812,11 +814,11 @@ export async function voteReport(input: VoteReportInput) {
   }
 
   if (vote === 0) {
-    await prisma.laporanVote.deleteMany({
+    await prisma.trLaporanVote.deleteMany({
       where: { laporanId: input.id, userId: input.userId },
     });
   } else {
-    await prisma.laporanVote.upsert({
+    await prisma.trLaporanVote.upsert({
       where: {
         laporanId_userId: {
           laporanId: input.id,
@@ -843,7 +845,7 @@ export async function voteReport(input: VoteReportInput) {
 export async function rateReport(input: RateReportInput) {
   const score = normalizeRatingScore(input.score);
   const note = normalizeOptionalText(input.note);
-  const laporan = await prisma.laporan.findFirst({
+  const laporan = await prisma.trLaporan.findFirst({
     where: { id: input.id, stsrc: { not: Stsrc.D } },
     include: {
       kategori: { include: { dinas: true } },
@@ -862,7 +864,7 @@ export async function rateReport(input: RateReportInput) {
     throw new AppError("Rating hanya bisa diberikan setelah laporan selesai.", 400);
   }
 
-  const rating = await prisma.laporanRating.upsert({
+  const rating = await prisma.trLaporanRating.upsert({
     where: { laporanId: input.id },
     create: {
       laporanId: input.id,
@@ -897,7 +899,7 @@ export async function resolveReport(input: ResolveReportInput) {
     throw new AppError("Catatan penyelesaian wajib diisi.", 400);
   }
 
-  const laporan = await prisma.laporan.update({
+  const laporan = await prisma.trLaporan.update({
     where: { id: input.id },
     data: {
       status: "resolved",
@@ -921,10 +923,15 @@ export async function resolveReport(input: ResolveReportInput) {
   });
 
   const dinasName = laporan.kategori?.dinas?.name || "Dinas";
-  notifyUser({
-    ...citizenStatusNotification("resolved", laporan.title, laporan.id, dinasName),
-    userId: laporan.createdById,
-  }).catch((error) => console.error("[notification] citizen notify failed:", error));
+  notifyCitizens(
+    citizenResolvedBroadcastNotification(laporan.title, laporan.id, dinasName, {
+      resolutionNote: laporan.resolutionNote ?? laporan.agencyNote,
+      imageUrl: laporan.resolutionImages[0] ?? laporan.images[0] ?? null,
+      reporterUserId: laporan.createdById,
+    }),
+  ).catch((error) =>
+    console.error("[notification] citizen resolved broadcast failed:", error),
+  );
 
   notifyReportOfficers({
     dinasId: laporan.kategori?.dinasId,

@@ -5,10 +5,10 @@ import type { PaginationParams } from "../../utils/apiResponse.js";
 const notDeleted = { not: Stsrc.D };
 
 export function findAgencies(
-  where: Prisma.DinasWhereInput,
+  where: Prisma.MsDinasWhereInput,
   pagination: PaginationParams,
 ) {
-  return prisma.dinas.findMany({
+  return prisma.msDinas.findMany({
     where,
     include: { kategori: { where: { stsrc: notDeleted } } },
     orderBy: { name: "asc" },
@@ -17,12 +17,12 @@ export function findAgencies(
   });
 }
 
-export function countAgencies(where: Prisma.DinasWhereInput) {
-  return prisma.dinas.count({ where });
+export function countAgencies(where: Prisma.MsDinasWhereInput) {
+  return prisma.msDinas.count({ where });
 }
 
-export function groupAgenciesByType(where: Prisma.DinasWhereInput) {
-  return prisma.dinas.groupBy({
+export function groupAgenciesByType(where: Prisma.MsDinasWhereInput) {
+  return prisma.msDinas.groupBy({
     by: ["type"],
     where,
     _count: {
@@ -31,8 +31,8 @@ export function groupAgenciesByType(where: Prisma.DinasWhereInput) {
   });
 }
 
-export function findAgencyLocations(where: Prisma.CabangDinasWhereInput) {
-  return prisma.cabangDinas.findMany({
+export function findAgencyLocations(where: Prisma.MsCabangDinasWhereInput) {
+  return prisma.msCabangDinas.findMany({
     where,
     select: {
       id: true,
@@ -63,12 +63,12 @@ export function findAgencyLocations(where: Prisma.CabangDinasWhereInput) {
   });
 }
 
-export function countAgencyLocations(where: Prisma.CabangDinasWhereInput) {
-  return prisma.cabangDinas.count({ where });
+export function countAgencyLocations(where: Prisma.MsCabangDinasWhereInput) {
+  return prisma.msCabangDinas.count({ where });
 }
 
-export function groupAgencyLocationsByDinas(where: Prisma.CabangDinasWhereInput) {
-  return prisma.cabangDinas.groupBy({
+export function groupAgencyLocationsByDinas(where: Prisma.MsCabangDinasWhereInput) {
+  return prisma.msCabangDinas.groupBy({
     by: ["dinasId"],
     where,
     _count: {
@@ -77,8 +77,8 @@ export function groupAgencyLocationsByDinas(where: Prisma.CabangDinasWhereInput)
   });
 }
 
-export function groupAgencyLocationsByCityRegency(where: Prisma.CabangDinasWhereInput) {
-  return prisma.cabangDinas.groupBy({
+export function groupAgencyLocationsByCityRegency(where: Prisma.MsCabangDinasWhereInput) {
+  return prisma.msCabangDinas.groupBy({
     by: ["cityRegency"],
     where,
     _count: {
@@ -88,14 +88,14 @@ export function groupAgencyLocationsByCityRegency(where: Prisma.CabangDinasWhere
 }
 
 export function findAgencySummariesByIds(ids: string[]) {
-  return prisma.dinas.findMany({
+  return prisma.msDinas.findMany({
     where: { id: { in: ids }, stsrc: notDeleted },
     select: { id: true, code: true, type: true, name: true },
   });
 }
 
 export function findAgencyById(id: string) {
-  return prisma.dinas.findUnique({
+  return prisma.msDinas.findUnique({
     where: { id, stsrc: notDeleted },
     include: {
       kategori: { where: { stsrc: notDeleted } },
@@ -114,14 +114,14 @@ export function findAgencyById(id: string) {
 }
 
 export function findAgencyId(id: string) {
-  return prisma.dinas.findUnique({
+  return prisma.msDinas.findUnique({
     where: { id, stsrc: notDeleted },
     select: { id: true },
   });
 }
 
 export function groupAgencyReportsByStatus(agencyId: string) {
-  return prisma.laporan.groupBy({
+  return prisma.trLaporan.groupBy({
     by: ["status"],
     where: { kategori: { dinasId: agencyId }, stsrc: notDeleted },
     _count: true,
@@ -129,10 +129,10 @@ export function groupAgencyReportsByStatus(agencyId: string) {
 }
 
 export function findAgencyReports(
-  where: Prisma.LaporanWhereInput,
+  where: Prisma.TrLaporanWhereInput,
   pagination: PaginationParams,
 ) {
-  return prisma.laporan.findMany({
+  return prisma.trLaporan.findMany({
     where,
     include: {
       kategori: { include: { dinas: true } },
@@ -144,12 +144,12 @@ export function findAgencyReports(
   });
 }
 
-export function countAgencyReports(where: Prisma.LaporanWhereInput) {
-  return prisma.laporan.count({ where });
+export function countAgencyReports(where: Prisma.TrLaporanWhereInput) {
+  return prisma.trLaporan.count({ where });
 }
 
-export function groupAgencyReportsByReportStatus(where: Prisma.LaporanWhereInput) {
-  return prisma.laporan.groupBy({
+export function groupAgencyReportsByReportStatus(where: Prisma.TrLaporanWhereInput) {
+  return prisma.trLaporan.groupBy({
     by: ["status"],
     where,
     _count: {
@@ -158,8 +158,8 @@ export function groupAgencyReportsByReportStatus(where: Prisma.LaporanWhereInput
   });
 }
 
-export function groupAgencyReportsByCategory(where: Prisma.LaporanWhereInput) {
-  return prisma.laporan.groupBy({
+export function groupAgencyReportsByCategory(where: Prisma.TrLaporanWhereInput) {
+  return prisma.trLaporan.groupBy({
     by: ["kategoriId"],
     where,
     _count: {
@@ -169,7 +169,7 @@ export function groupAgencyReportsByCategory(where: Prisma.LaporanWhereInput) {
 }
 
 export function findCategorySummariesByIds(ids: string[]) {
-  return prisma.kategoriLaporan.findMany({
+  return prisma.msKategoriLaporan.findMany({
     where: { id: { in: ids }, stsrc: notDeleted },
     select: { id: true, code: true, name: true },
   });

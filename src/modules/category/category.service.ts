@@ -8,7 +8,7 @@ import {
 import type { ListCategoriesInput } from "../../types/category.js";
 
 export async function listCategories(input: ListCategoriesInput) {
-  const where: Prisma.KategoriLaporanWhereInput = {
+  const where: Prisma.MsKategoriLaporanWhereInput = {
     stsrc: { not: Stsrc.D },
     dinas: { stsrc: { not: Stsrc.D } },
     ...(input.search ? { name: { contains: input.search, mode: "insensitive" } } : {}),

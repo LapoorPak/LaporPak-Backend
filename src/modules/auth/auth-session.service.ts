@@ -3,7 +3,7 @@ import { AppError } from "../../middleware/authMiddleware.js";
 import type { GetSessionDetailInput } from "../../types/auth.js";
 
 export async function getSessionDetail(input: GetSessionDetailInput) {
-  const user = await prisma.user.findUnique({
+  const user = await prisma.msUser.findUnique({
     where: { id: input.userId },
     select: {
       id: true,

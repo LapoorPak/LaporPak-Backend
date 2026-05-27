@@ -15,6 +15,15 @@ const prisma = new PrismaClient({ adapter });
 const OFFICE_PHOTO_DIR = path.resolve("fotodinas");
 const OFFICE_PHOTO_PUBLIC_PATH = "/fotodinas";
 const OFFICE_PHOTO_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+const OFFICE_PHOTO_FALLBACK_BY_TYPE: Record<string, string> = {
+  bpbd: "sda",
+  kesehatan: "cipta_karya",
+  pemadam_kebakaran: "sda",
+  perumahan: "cipta_karya",
+  ptsp: "cipta_karya",
+  pupr: "bina_marga",
+  satpol_pp: "perhubungan",
+};
 const DEFAULT_DINAS_ACCOUNT_PASSWORD = process.env.SEED_DINAS_PASSWORD || "LaporPak123!";
 const DEFAULT_DINAS_EMAIL_DOMAIN = process.env.SEED_DINAS_EMAIL_DOMAIN || "laporpak.test";
 const DEFAULT_ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL || "admin@laporpak.test";
@@ -164,6 +173,129 @@ const CABANG_SEED_DATA: CabangSeedDefinition[] = [
   { name: "Suku Dinas Cipta Karya Jakarta Utara", type: "cipta_karya", lat: -6.1202506, lng: 106.8904244 },
 ];
 
+const CABANG_CONTACT_BY_NAME: Record<string, { address: string; phone: string | null }> = {
+  "Dinas Bina Marga Provinsi DKI Jakarta": {
+    address: "Jl. Taman Jati Baru No. 1, Tanah Abang, Jakarta Pusat",
+    phone: "021 3848672",
+  },
+  "Dinas Perhubungan Provinsi DKI Jakarta": {
+    address: "Jl. Taman Jatibaru No. 1, Jakarta Pusat",
+    phone: "021 3501349",
+  },
+  "Dinas Sumber Daya Air Provinsi DKI Jakarta": {
+    address: "Jl. Taman Jati Baru No. 1, Tanah Abang, Jakarta Pusat",
+    phone: "021 3846608, 021 3849626, 021 3803302",
+  },
+  "Dinas Lingkungan Hidup Provinsi DKI Jakarta": {
+    address: "Jl. Mandala V No. 67, Cililitan Besar, Jakarta Timur",
+    phone: "021 8092744",
+  },
+  "Dinas Cipta Karya Provinsi DKI Jakarta": {
+    address: "Jl. Abdul Muis No. 66 Lt. 4, Jakarta Pusat",
+    phone: "021 3510266, 021 3865919, 021 3865917",
+  },
+  "Suku Dinas Bina Marga Jakarta Pusat": {
+    address: "Jl. Tanah Abang I No. 1, Jakarta Pusat",
+    phone: "021 3440290",
+  },
+  "Suku Dinas Perhubungan Jakarta Pusat": {
+    address: "Jl. Stasiun Senen No. 5, Jakarta Pusat",
+    phone: "021 42887286",
+  },
+  "Suku Dinas Sumber Daya Air Jakarta Pusat": {
+    address: "Kantor Walikota Jakarta Pusat, Jl. Tanah Abang I No. 1, Jakarta Pusat",
+    phone: "021 3522420",
+  },
+  "Suku Dinas Lingkungan Hidup Jakarta Pusat": {
+    address: "Komp. Perkantoran Rawa Kerbau Rawasari, Jakarta Pusat 10573",
+    phone: "021 4208743",
+  },
+  "Suku Dinas Cipta Karya Jakarta Pusat": {
+    address: "Jl. Tanah Abang I Blok C, Jakarta Pusat",
+    phone: "021 3459938",
+  },
+  "Suku Dinas Bina Marga Jakarta Selatan": {
+    address: "Jl. Prapanca, Jakarta Selatan",
+    phone: "021 7251311",
+  },
+  "Suku Dinas Perhubungan Jakarta Selatan": {
+    address: "Gedung BPKMP Lt. LV, Jl. Mayjen MT Haryono Kav. 45-46, Jakarta Selatan",
+    phone: null,
+  },
+  "Suku Dinas Sumber Daya Air Jakarta Selatan": {
+    address: "Jl. Prapanca, Jakarta Selatan",
+    phone: "021 7205682",
+  },
+  "Suku Dinas Lingkungan Hidup Jakarta Selatan": {
+    address: "Jl. Buncit Raya No. 41, Mampang Prapatan, Jakarta Selatan",
+    phone: "021 7949309",
+  },
+  "Suku Dinas Cipta Karya Jakarta Selatan": {
+    address: "Jl. Prapanca Raya No. 9 Lantai 9, Kebayoran Baru, Jakarta Selatan",
+    phone: "021 7220911",
+  },
+  "Suku Dinas Bina Marga Jakarta Barat": {
+    address: "Jl. Kembangan Raya, Jakarta Barat",
+    phone: "021 58357691",
+  },
+  "Suku Dinas Perhubungan Jakarta Barat": {
+    address: "Komp. Terminal Bus Rawa Buaya, Jl. Lingkar Luar, Jakarta Barat",
+    phone: "021 5459548",
+  },
+  "Suku Dinas Sumber Daya Air Jakarta Barat": {
+    address: "Jl. Kembangan Raya, Jakarta Barat",
+    phone: "021 5682422",
+  },
+  "Suku Dinas Lingkungan Hidup Jakarta Barat": {
+    address: "Jl. Perdana No. 2, Kel. Wijaya Kusuma, Jakarta Barat 11460",
+    phone: "021 5663524",
+  },
+  "Suku Dinas Cipta Karya Jakarta Barat": {
+    address: "Jl. Raya Kembangan No. 2, Jakarta Barat",
+    phone: "021 5821759",
+  },
+  "Suku Dinas Bina Marga Jakarta Timur": {
+    address: "Jl. Sentra Primer Pulo Gebang, Jakarta Timur",
+    phone: "021 48703465",
+  },
+  "Suku Dinas Perhubungan Jakarta Timur": {
+    address: "Jl. Perserikatan Rawamangun, Jakarta Timur",
+    phone: "021 4893764",
+  },
+  "Suku Dinas Sumber Daya Air Jakarta Timur": {
+    address: "Jl. Sentra Primer Pulo Gebang, Jakarta Timur",
+    phone: "021 48703464",
+  },
+  "Suku Dinas Lingkungan Hidup Jakarta Timur": {
+    address: "Jl. SMA 48 Pinang Ranti, Jakarta Timur",
+    phone: "021 80886971",
+  },
+  "Suku Dinas Cipta Karya Jakarta Timur": {
+    address: "Jl. DR. Sumarno, Jakarta Timur",
+    phone: "021 4802043",
+  },
+  "Suku Dinas Bina Marga Jakarta Utara": {
+    address: "Jl. Yos Sudarso No. 27-29, Jakarta Utara",
+    phone: "021 43902028",
+  },
+  "Suku Dinas Perhubungan Jakarta Utara": {
+    address: "Jl. Yos Sudarso No. 12, Tanjung Priok, Jakarta Utara",
+    phone: "021 43900664",
+  },
+  "Suku Dinas Sumber Daya Air Jakarta Utara": {
+    address: "Jl. Yos Sudarso No. 27-29, Jakarta Utara",
+    phone: "021 43907023",
+  },
+  "Suku Dinas Lingkungan Hidup Jakarta Utara": {
+    address: "Jl. Alur Laut No. 2, Plumpang, Jakarta Utara",
+    phone: "021 43934663",
+  },
+  "Suku Dinas Cipta Karya Jakarta Utara": {
+    address: "Jl. Laksda Yos Sudarso No. 27-29, Tanjung Priok, Jakarta Utara",
+    phone: "021 43933580, 021 4304427",
+  },
+};
+
 function inferProvince(name: string) {
   if (name.includes("Tangerang")) {
     return "Banten";
@@ -232,7 +364,7 @@ function inferServiceTags(office: CabangSeedDefinition) {
   return Array.from(tags);
 }
 
-function getOfficePhotoUrls(type: string) {
+function getOfficePhotoUrlsFromFolder(type: string) {
   const folderPath = path.join(OFFICE_PHOTO_DIR, type);
 
   if (!fs.existsSync(folderPath)) {
@@ -246,6 +378,17 @@ function getOfficePhotoUrls(type: string) {
     .filter((fileName) => OFFICE_PHOTO_EXTENSIONS.has(path.extname(fileName).toLowerCase()))
     .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
     .map((fileName) => `${OFFICE_PHOTO_PUBLIC_PATH}/${type}/${fileName}`);
+}
+
+function getOfficePhotoUrls(type: string) {
+  const photoUrls = getOfficePhotoUrlsFromFolder(type);
+
+  if (photoUrls.length > 0) {
+    return photoUrls;
+  }
+
+  const fallbackType = OFFICE_PHOTO_FALLBACK_BY_TYPE[type];
+  return fallbackType ? getOfficePhotoUrlsFromFolder(fallbackType) : [];
 }
 
 function buildDinasSeedEmail(code: string) {
@@ -273,7 +416,7 @@ async function seedDinas() {
   const dinasIdByCode = new Map<string, string>();
 
   for (const dinas of DINAS_DEFINITIONS) {
-    const saved = await prisma.dinas.upsert({
+    const saved = await prisma.msDinas.upsert({
       where: { code: dinas.code },
       update: {
         type: dinas.code,
@@ -307,7 +450,7 @@ async function seedKategori(dinasIdByCode: Map<string, string>) {
       throw new Error(`Missing dinas seed for category ${category.code}`);
     }
 
-    await prisma.kategoriLaporan.upsert({
+    await prisma.msKategoriLaporan.upsert({
       where: { code: category.code },
       update: {
         name: category.name,
@@ -345,8 +488,9 @@ async function seedCabang(dinasIdByCode: Map<string, string>) {
     const coverageRadiusKm = inferCoverageRadiusKm(office.name);
     const serviceTags = inferServiceTags(office);
     const photoUrls = getOfficePhotoUrls(office.type);
+    const contact = CABANG_CONTACT_BY_NAME[office.name];
 
-    const existing = await prisma.cabangDinas.findFirst({
+    const existing = await prisma.msCabangDinas.findFirst({
       where: {
         dinasId,
         name: office.name,
@@ -356,8 +500,10 @@ async function seedCabang(dinasIdByCode: Map<string, string>) {
     const data = {
       name: office.name,
       wilayah,
+      address: contact?.address ?? null,
       latitude: office.lat,
       longitude: office.lng,
+      phone: contact?.phone ?? null,
       province,
       cityRegency,
       coverageRadiusKm,
@@ -371,14 +517,14 @@ async function seedCabang(dinasIdByCode: Map<string, string>) {
     };
 
     if (existing) {
-      await prisma.cabangDinas.update({
+      await prisma.msCabangDinas.update({
         where: { id: existing.id },
         data,
       });
       continue;
     }
 
-    await prisma.cabangDinas.create({ data });
+    await prisma.msCabangDinas.create({ data });
   }
 
   for (const dinas of DINAS_DEFINITIONS) {
@@ -387,7 +533,7 @@ async function seedCabang(dinasIdByCode: Map<string, string>) {
       throw new Error(`Missing dinas seed for default office ${dinas.name}`);
     }
 
-    const cabangCount = await prisma.cabangDinas.count({
+    const cabangCount = await prisma.msCabangDinas.count({
       where: { dinasId },
     });
 
@@ -397,13 +543,16 @@ async function seedCabang(dinasIdByCode: Map<string, string>) {
 
     const defaultOffice = buildDefaultCabangSeed(dinas);
     const photoUrls = getOfficePhotoUrls(defaultOffice.type);
+    const contact = CABANG_CONTACT_BY_NAME[defaultOffice.name];
 
-    await prisma.cabangDinas.create({
+    await prisma.msCabangDinas.create({
       data: {
         name: defaultOffice.name,
         wilayah: inferWilayah(defaultOffice.name),
+        address: contact?.address ?? null,
         latitude: defaultOffice.lat,
         longitude: defaultOffice.lng,
+        phone: contact?.phone ?? null,
         province: inferProvince(defaultOffice.name),
         cityRegency: inferCityRegency(defaultOffice.name),
         coverageRadiusKm: inferCoverageRadiusKm(defaultOffice.name),
@@ -421,7 +570,7 @@ async function seedCabang(dinasIdByCode: Map<string, string>) {
 }
 
 async function findPrimaryCabangDinasId(dinasId: string) {
-  const provinceOffice = await prisma.cabangDinas.findFirst({
+  const provinceOffice = await prisma.msCabangDinas.findFirst({
     where: {
       dinasId,
       name: {
@@ -442,7 +591,7 @@ async function findPrimaryCabangDinasId(dinasId: string) {
     return provinceOffice;
   }
 
-  const fallbackOffice = await prisma.cabangDinas.findFirst({
+  const fallbackOffice = await prisma.msCabangDinas.findFirst({
     where: { dinasId },
     select: {
       id: true,
@@ -473,7 +622,7 @@ async function seedAkunDinas(dinasIdByCode: Map<string, string>) {
     const email = buildDinasSeedEmail(dinas.code);
     const passwordHash = await hashPassword(DEFAULT_DINAS_ACCOUNT_PASSWORD);
 
-    const user = await prisma.user.upsert({
+    const user = await prisma.msUser.upsert({
       where: { email },
       update: {
         name: `Petugas ${dinas.short}`,
@@ -492,7 +641,7 @@ async function seedAkunDinas(dinasIdByCode: Map<string, string>) {
       },
     });
 
-    const credentialAccount = await prisma.account.findFirst({
+    const credentialAccount = await prisma.msAccount.findFirst({
       where: {
         userId: user.id,
         providerId: "credential",
@@ -503,7 +652,7 @@ async function seedAkunDinas(dinasIdByCode: Map<string, string>) {
     });
 
     if (credentialAccount) {
-      await prisma.account.update({
+      await prisma.msAccount.update({
         where: { id: credentialAccount.id },
         data: {
           accountId: user.id,
@@ -511,7 +660,7 @@ async function seedAkunDinas(dinasIdByCode: Map<string, string>) {
         },
       });
     } else {
-      await prisma.account.create({
+      await prisma.msAccount.create({
         data: {
           id: randomUUID(),
           accountId: user.id,
@@ -522,7 +671,7 @@ async function seedAkunDinas(dinasIdByCode: Map<string, string>) {
       });
     }
 
-    await prisma.petugasDinas.upsert({
+    await prisma.msPetugasDinas.upsert({
       where: { userId: user.id },
       update: {
         nip: buildDinasSeedNip(index),
@@ -553,7 +702,7 @@ async function seedWargaUsers(count = 5) {
     const email = buildUserSeedEmail(i);
     const name = `Warga ${String(i + 1).padStart(2, "0")}`;
 
-    const user = await prisma.user.upsert({
+    const user = await prisma.msUser.upsert({
       where: { email },
       update: {
         name,
@@ -572,7 +721,7 @@ async function seedWargaUsers(count = 5) {
       },
     });
 
-    const credentialAccount = await prisma.account.findFirst({
+    const credentialAccount = await prisma.msAccount.findFirst({
       where: {
         userId: user.id,
         providerId: "credential",
@@ -583,7 +732,7 @@ async function seedWargaUsers(count = 5) {
     });
 
     if (credentialAccount) {
-      await prisma.account.update({
+      await prisma.msAccount.update({
         where: { id: credentialAccount.id },
         data: {
           accountId: user.id,
@@ -591,7 +740,7 @@ async function seedWargaUsers(count = 5) {
         },
       });
     } else {
-      await prisma.account.create({
+      await prisma.msAccount.create({
         data: {
           id: randomUUID(),
           accountId: user.id,
@@ -611,7 +760,7 @@ async function seedWargaUsers(count = 5) {
 async function seedAdminAccount() {
   const passwordHash = await hashPassword(DEFAULT_ADMIN_PASSWORD);
 
-  const user = await prisma.user.upsert({
+  const user = await prisma.msUser.upsert({
     where: { email: DEFAULT_ADMIN_EMAIL },
     update: {
       name: DEFAULT_ADMIN_NAME,
@@ -630,7 +779,7 @@ async function seedAdminAccount() {
     },
   });
 
-  const credentialAccount = await prisma.account.findFirst({
+  const credentialAccount = await prisma.msAccount.findFirst({
     where: {
       userId: user.id,
       providerId: "credential",
@@ -641,7 +790,7 @@ async function seedAdminAccount() {
   });
 
   if (credentialAccount) {
-    await prisma.account.update({
+    await prisma.msAccount.update({
       where: { id: credentialAccount.id },
       data: {
         accountId: user.id,
@@ -649,7 +798,7 @@ async function seedAdminAccount() {
       },
     });
   } else {
-    await prisma.account.create({
+    await prisma.msAccount.create({
       data: {
         id: randomUUID(),
         accountId: user.id,
@@ -674,7 +823,7 @@ async function main() {
   const seededAdmin = await seedAdminAccount();
 
   console.log(
-    `Seed selesai: ${DINAS_DEFINITIONS.length} dinas, ${REPORT_CATEGORIES.length} kategori, ${await prisma.cabangDinas.count()} kantor/cabang, ${seededAccounts.length} akun dinas.`,
+    `Seed selesai: ${DINAS_DEFINITIONS.length} dinas, ${REPORT_CATEGORIES.length} kategori, ${await prisma.msCabangDinas.count()} kantor/cabang, ${seededAccounts.length} akun dinas.`,
   );
   console.log(
     `Login akun dinas: email format ${buildDinasSeedEmail("<kode_dinas>")} dengan password ${DEFAULT_DINAS_ACCOUNT_PASSWORD}.`,

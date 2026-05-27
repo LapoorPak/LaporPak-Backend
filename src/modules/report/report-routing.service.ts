@@ -35,7 +35,7 @@ export async function resolveCabangDinas(params: {
   longitude: number;
 }): Promise<CabangRoutingResolution> {
   const wilayah = getWilayah(params.latitude, params.longitude);
-  const cabangList = await prisma.cabangDinas.findMany({
+  const cabangList = await prisma.msCabangDinas.findMany({
     where: {
       isRoutingEnabled: true,
       stsrc: { not: Stsrc.D },

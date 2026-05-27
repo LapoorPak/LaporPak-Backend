@@ -26,8 +26,8 @@ import type {
 
 const VALID_REPORT_STATUSES = Object.values(LaporanStatus);
 
-function buildAgencyLocationWhere(input: AgencyLocationFilters): Prisma.CabangDinasWhereInput {
-  const filters: Prisma.CabangDinasWhereInput[] = [
+function buildAgencyLocationWhere(input: AgencyLocationFilters): Prisma.MsCabangDinasWhereInput {
+  const filters: Prisma.MsCabangDinasWhereInput[] = [
     {
       isRoutingEnabled: true,
       stsrc: { not: Stsrc.D },
@@ -79,7 +79,7 @@ function buildAgencyLocationWhere(input: AgencyLocationFilters): Prisma.CabangDi
   return filters.length === 1 ? filters[0] : { AND: filters };
 }
 
-async function getAgencyLocationStats(where: Prisma.CabangDinasWhereInput) {
+async function getAgencyLocationStats(where: Prisma.MsCabangDinasWhereInput) {
   const [groupedByDinas, groupedByCityRegency] = await Promise.all([
     groupAgencyLocationsByDinas(where),
     groupAgencyLocationsByCityRegency(where),
@@ -120,7 +120,7 @@ export function validateAgencyReportStatus(status?: string) {
 }
 
 export async function listAgencies(input: ListAgenciesInput) {
-  const where: Prisma.DinasWhereInput = {
+  const where: Prisma.MsDinasWhereInput = {
     stsrc: { not: Stsrc.D },
     ...(input.search ? { name: { contains: input.search, mode: "insensitive" } } : {}),
     ...(input.type ? { type: input.type } : {}),
@@ -217,7 +217,7 @@ export async function getAgencyStats(id: string) {
 }
 
 export async function listAgencyReports(input: ListAgencyReportsInput) {
-  const where: Prisma.LaporanWhereInput = {
+  const where: Prisma.TrLaporanWhereInput = {
     stsrc: { not: Stsrc.D },
     kategori: { dinasId: input.agencyId },
     ...(input.status ? { status: input.status } : {}),

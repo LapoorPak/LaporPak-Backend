@@ -3,9 +3,9 @@ import { LaporanStatus, Prisma, Stsrc } from "../../generated/prisma/client.js";
 import { AppError } from "../../middleware/authMiddleware.js";
 
 export function combineReportWhere(
-  ...conditions: Array<Prisma.LaporanWhereInput | null | undefined>
-): Prisma.LaporanWhereInput {
-  const filters = conditions.filter((condition): condition is Prisma.LaporanWhereInput => {
+  ...conditions: Array<Prisma.TrLaporanWhereInput | null | undefined>
+): Prisma.TrLaporanWhereInput {
+  const filters = conditions.filter((condition): condition is Prisma.TrLaporanWhereInput => {
     if (!condition || typeof condition !== "object") {
       return false;
     }
@@ -29,8 +29,8 @@ export function buildReportDashboardBaseWhere(input: {
   dinasId?: string;
   cabangDinasId?: string;
   kategoriId?: string;
-}): Prisma.LaporanWhereInput {
-  const filters: Prisma.LaporanWhereInput[] = [
+}): Prisma.TrLaporanWhereInput {
+  const filters: Prisma.TrLaporanWhereInput[] = [
     { status: { not: LaporanStatus.rejected } },
     { stsrc: { not: Stsrc.D } },
   ];
@@ -66,8 +66,8 @@ export function buildReportDashboardBaseWhere(input: {
   return combineReportWhere(...filters);
 }
 
-export async function getReportDashboardSummary(where: Prisma.LaporanWhereInput) {
-  const groupedByStatus = await prisma.laporan.groupBy({
+export async function getReportDashboardSummary(where: Prisma.TrLaporanWhereInput) {
+  const groupedByStatus = await prisma.trLaporan.groupBy({
     by: ["status"],
     where,
     _count: {
@@ -116,7 +116,7 @@ export async function getAgencyDashboardScope(input: {
   let scopeCabangDinasId = input.requestedCabangDinasId ?? null;
 
   const requestedCabang = input.requestedCabangDinasId
-    ? await prisma.cabangDinas.findFirst({
+    ? await prisma.msCabangDinas.findFirst({
         where: { id: input.requestedCabangDinasId, stsrc: { not: Stsrc.D } },
         select: {
           id: true,
@@ -150,7 +150,7 @@ export async function getAgencyDashboardScope(input: {
   }
 
   if (!isAdmin) {
-    const officer = await prisma.petugasDinas.findUnique({
+    const officer = await prisma.msPetugasDinas.findUnique({
       where: { userId: input.userId },
       select: {
         cabangDinas: {
@@ -232,7 +232,7 @@ export async function getAgencyDashboardScope(input: {
 
   const dinas =
     requestedCabang?.dinas ??
-    (await prisma.dinas.findFirst({
+    (await prisma.msDinas.findFirst({
       where: { id: scopeDinasId, stsrc: { not: Stsrc.D } },
       select: {
         id: true,

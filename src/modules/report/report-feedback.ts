@@ -40,18 +40,18 @@ export async function getReportFeedbackByIds(laporanIds: string[], userId?: stri
   }
 
   const [voteGroups, myVotes, ratings] = await Promise.all([
-    prisma.laporanVote.groupBy({
+    prisma.trLaporanVote.groupBy({
       by: ["laporanId", "value"],
       where: { laporanId: { in: uniqueIds } },
       _count: { _all: true },
     }),
     userId
-      ? prisma.laporanVote.findMany({
+      ? prisma.trLaporanVote.findMany({
           where: { laporanId: { in: uniqueIds }, userId },
           select: { laporanId: true, value: true },
         })
       : Promise.resolve([]),
-    prisma.laporanRating.findMany({
+    prisma.trLaporanRating.findMany({
       where: { laporanId: { in: uniqueIds } },
       select: {
         laporanId: true,

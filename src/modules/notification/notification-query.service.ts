@@ -13,15 +13,15 @@ export async function listUserNotifications(input: ListUserNotificationsInput) {
   };
 
   const [notifications, total, unreadCount, groupedByType] = await Promise.all([
-    prisma.notification.findMany({
+    prisma.trNotification.findMany({
       where,
       orderBy: { createdAt: "desc" },
       skip: input.pagination.skip,
       take: input.pagination.take,
     }),
-    prisma.notification.count({ where }),
-    prisma.notification.count({ where: { userId: input.userId, isRead: false } }),
-    prisma.notification.groupBy({
+    prisma.trNotification.count({ where }),
+    prisma.trNotification.count({ where: { userId: input.userId, isRead: false } }),
+    prisma.trNotification.groupBy({
       by: ["type"],
       where,
       _count: {
@@ -40,6 +40,7 @@ export async function listUserNotifications(input: ListUserNotificationsInput) {
       read: notification.isRead,
       tag: notification.tag,
       laporanId: notification.laporanId,
+      metadata: notification.metadata,
     })),
     total,
     stats: {
@@ -53,13 +54,13 @@ export async function listUserNotifications(input: ListUserNotificationsInput) {
 }
 
 export async function getUnreadNotificationCount(userId: string) {
-  return prisma.notification.count({
+  return prisma.trNotification.count({
     where: { userId, isRead: false },
   });
 }
 
 export async function markNotificationAsRead(input: MarkNotificationAsReadInput) {
-  const notification = await prisma.notification.findUnique({
+  const notification = await prisma.trNotification.findUnique({
     where: { id: input.notificationId },
   });
 
@@ -71,14 +72,14 @@ export async function markNotificationAsRead(input: MarkNotificationAsReadInput)
     throw new AppError("Forbidden", 403);
   }
 
-  await prisma.notification.update({
+  await prisma.trNotification.update({
     where: { id: input.notificationId },
     data: { isRead: true, readAt: new Date() },
   });
 }
 
 export async function markAllNotificationsAsRead(userId: string) {
-  return prisma.notification.updateMany({
+  return prisma.trNotification.updateMany({
     where: { userId, isRead: false },
     data: { isRead: true, readAt: new Date() },
   });
